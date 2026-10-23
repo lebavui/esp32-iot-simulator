@@ -1,0 +1,481 @@
+// Part definitions: geometry, pins, attributes, SVG visuals and electrical behaviour.
+import { glyph } from '../font5x7.js';
+
+export const ESP32_LEFT = ['EN', 'VP', 'VN', 'D34', 'D35', 'D32', 'D33', 'D25', 'D26', 'D27', 'D14', 'D12', 'D13', 'GND.1', 'VIN'];
+export const ESP32_RIGHT = ['D23', 'D22', 'TX0', 'RX0', 'D21', 'D19', 'D18', 'D5', 'TX2', 'RX2', 'D4', 'D2', 'D15', 'GND.2', '3V3'];
+export const ESP32_GPIO = { VP: 36, VN: 39, TX0: 1, RX0: 3, TX2: 17, RX2: 16 };
+for (const n of [...ESP32_LEFT, ...ESP32_RIGHT]) if (/^D\d+$/.test(n)) ESP32_GPIO[n] = Number(n.slice(1));
+
+const LED_COLORS = { red: '#ff3030', green: '#30e050', blue: '#3d7dff', yellow: '#ffe030', white: '#f4f4ff', orange: '#ff8a1a', purple: '#b04dff' };
+
+export function parseOhms(v) {
+  const m = /^\s*([\d.]+)\s*([kKmMrR]?)/.exec(String(v));
+  if (!m) return 1000;
+  let n = parseFloat(m[1]);
+  if (m[2] === 'k' || m[2] === 'K') n *= 1e3;
+  if (m[2] === 'M') n *= 1e6;
+  return Math.max(0.1, n);
+}
+
+function resistorBands(ohms) {
+  const colors = ['#000', '#7a4a1a', '#e02020', '#ff8c00', '#ffd700', '#20a020', '#2050e0', '#8a2be2', '#888', '#fff'];
+  let exp = 0;
+  let v = Math.round(ohms);
+  if (v < 10) return [colors[0], colors[v] || colors[0], '#d4af37'];
+  while (v >= 100) { v = Math.round(v / 10); exp++; }
+  return [colors[Math.floor(v / 10)], colors[v % 10], colors[exp] || '#000'];
+}
+
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+
+// Helper: pins on a straight row
+const rowPins = (names, x0, dx, y) => names.map((n, i) => ({ name: n, x: x0 + i * dx, y }));
+
+export const PARTS = {
+  // ---------------------------------------------------------------- ESP32
+  'wokwi-esp32-devkit-v1': {
+    label: 'ESP32 DevKit V1', category: 'Vi điều khiển', unique: true,
+    size: () => ({ w: 124, h: 262 }),
+    pins: () => [
+      ...ESP32_LEFT.map((n, i) => ({ name: n, x: 8, y: 60 + i * 12 })),
+      ...ESP32_RIGHT.map((n, i) => ({ name: n, x: 116, y: 60 + i * 12 })),
+    ],
+    render() {
+      const lbl = (n, x, y, anchor) => `<text x="${x}" y="${y + 2}" text-anchor="${anchor}" class="pl">${n.replace(/\.\d$/, '')}</text>`;
+      let s = `<rect x="0" y="0" width="124" height="262" rx="4" fill="#20232a"/>
+      <rect x="30" y="4" width="64" height="104" rx="2" fill="#2b2f36"/>
+      <path d="M36 9h6v10h4V9h6v10h4V9h6v10h4V9h6v12H36z" fill="none" stroke="#c9a227" stroke-width="1.6"/>
+      <rect x="32" y="26" width="60" height="80" rx="2" fill="#b9bec6" stroke="#8b9099"/>
+      <text x="62" y="52" text-anchor="middle" font-size="7" fill="#444" font-family="monospace">ESP32-WROOM</text>
+      <text x="62" y="62" text-anchor="middle" font-size="5" fill="#555" font-family="monospace">WiFi + BT</text>
+      <circle cx="62" cy="86" r="7" fill="none" stroke="#999"/><text x="62" y="88.5" text-anchor="middle" font-size="5.5" fill="#777">ESP</text>
+      <text x="62" y="140" text-anchor="middle" font-size="7" fill="#d8d8d8" font-family="sans-serif" font-weight="bold">ESP32</text>
+      <text x="62" y="150" text-anchor="middle" font-size="5" fill="#aaa" font-family="sans-serif">DEVKIT V1</text>
+      <rect x="44" y="246" width="36" height="16" rx="2" fill="#c0c4cc" stroke="#888"/>
+      <rect x="14" y="238" width="14" height="10" rx="2" fill="#444"/><circle cx="21" cy="243" r="3" fill="#111"/>
+      <rect x="96" y="238" width="14" height="10" rx="2" fill="#444"/><circle cx="103" cy="243" r="3" fill="#111"/>
+      <text x="21" y="256" text-anchor="middle" font-size="4.5" fill="#bbb">EN</text><text x="103" y="256" text-anchor="middle" font-size="4.5" fill="#bbb">BOOT</text>
+      <rect x="36" y="232" width="6" height="4" fill="#600" class="pwr-led"/><text x="39" y="242" text-anchor="middle" font-size="4" fill="#999">PWR</text>
+      <rect x="82" y="232" width="6" height="4" fill="#123" class="d2-led"/><text x="85" y="242" text-anchor="middle" font-size="4" fill="#999">D2</text>`;
+      ESP32_LEFT.forEach((n, i) => { s += `<rect x="3" y="${55 + i * 12}" width="10" height="10" fill="#111" rx="1"/><circle cx="8" cy="${60 + i * 12}" r="2.6" fill="#d4af37"/>` + lbl(n, 16, 60 + i * 12, 'start'); });
+      ESP32_RIGHT.forEach((n, i) => { s += `<rect x="111" y="${55 + i * 12}" width="10" height="10" fill="#111" rx="1"/><circle cx="116" cy="${60 + i * 12}" r="2.6" fill="#d4af37"/>` + lbl(n, 108, 60 + i * 12, 'end'); });
+      return s;
+    },
+    drive(part, api) {
+      if (!api.running) return [];
+      return [{ pin: 'GND.1', v: 0 }, { pin: 'GND.2', v: 0 }, { pin: '3V3', v: 3.3 }, { pin: 'VIN', v: 5 }];
+    },
+    update(part, ctx) {
+      const el = part.el;
+      el.querySelector('.pwr-led').setAttribute('fill', ctx.running ? '#ff2020' : '#600');
+      const v = ctx.V('D2');
+      el.querySelector('.d2-led').setAttribute('fill', ctx.running && v != null && v > 1.6 ? '#3da5ff' : '#123');
+    },
+  },
+
+  // ---------------------------------------------------------------- passive / basic
+  'wokwi-led': {
+    label: 'LED', category: 'Cơ bản',
+    attrs: [{ key: 'color', label: 'Màu', type: 'select', options: Object.keys(LED_COLORS), default: 'red' }],
+    size: () => ({ w: 30, h: 66 }),
+    pins: () => [{ name: 'A', x: 10, y: 64 }, { name: 'C', x: 20, y: 64 }],
+    render(part) {
+      const c = LED_COLORS[part.attrs.color] || LED_COLORS.red;
+      return `<circle class="glow" cx="15" cy="17" r="15" fill="${c}" opacity="0" filter="url(#glow)"/>
+      <line x1="20" y1="36" x2="20" y2="64" stroke="#9aa" stroke-width="1.8"/>
+      <path d="M10 36v6l-3 4v18" stroke="#9aa" stroke-width="1.8" fill="none" transform="translate(3 0)"/>
+      <text x="4" y="62" font-size="5" fill="#888">+</text>
+      <path d="M5 36V15a10 10 0 0 1 20 0v21z" fill="${c}" opacity="0.55" stroke="${c}" stroke-width="0.6" class="body"/>
+      <rect x="3" y="33" width="24" height="4" rx="1" fill="${c}" opacity="0.7"/>
+      <path d="M9 10a6 6 0 0 1 6-4" stroke="#fff" stroke-width="1.4" fill="none" opacity="0.6"/>`;
+    },
+    update(part, ctx) {
+      const va = ctx.V('A'), vc = ctx.V('C');
+      let b = 0;
+      if (va != null && vc != null) b = Math.max(0, Math.min(1, (va - vc - 0.3) / 2.5));
+      part.el.querySelector('.glow').setAttribute('opacity', (b * 0.95).toFixed(2));
+      part.el.querySelector('.body').setAttribute('opacity', (0.55 + b * 0.45).toFixed(2));
+    },
+  },
+  'wokwi-resistor': {
+    label: 'Điện trở', category: 'Cơ bản',
+    attrs: [{ key: 'value', label: 'Giá trị (Ω)', type: 'text', default: '220' }],
+    size: () => ({ w: 64, h: 12 }),
+    pins: () => [{ name: '1', x: 2, y: 6 }, { name: '2', x: 62, y: 6 }],
+    render(part) {
+      const [b1, b2, b3] = resistorBands(parseOhms(part.attrs.value));
+      return `<line x1="0" y1="6" x2="64" y2="6" stroke="#9aa" stroke-width="1.8"/>
+      <rect x="16" y="1" width="32" height="10" rx="4" fill="#d9bf8f"/>
+      <rect x="21" y="1" width="3" height="10" fill="${b1}"/><rect x="27" y="1" width="3" height="10" fill="${b2}"/>
+      <rect x="33" y="1" width="3" height="10" fill="${b3}"/><rect x="41" y="1" width="3" height="10" fill="#d4af37"/>`;
+    },
+    links: (part) => [['1', '2', parseOhms(part.attrs.value)]],
+  },
+  'wokwi-pushbutton': {
+    label: 'Nút nhấn', category: 'Cơ bản',
+    attrs: [{ key: 'color', label: 'Màu', type: 'select', options: ['red', 'green', 'blue', 'yellow', 'white', 'black'], default: 'red' }],
+    size: () => ({ w: 36, h: 48 }),
+    pins: () => [{ name: '1', x: 8, y: 46 }, { name: '2', x: 28, y: 46 }],
+    render(part) {
+      const c = { red: '#d42020', green: '#1fa83a', blue: '#2060d0', yellow: '#e8c020', white: '#eee', black: '#222' }[part.attrs.color] || '#d42020';
+      return `<line x1="8" y1="30" x2="8" y2="48" stroke="#9aa" stroke-width="1.8"/><line x1="28" y1="30" x2="28" y2="48" stroke="#9aa" stroke-width="1.8"/>
+      <rect x="2" y="2" width="32" height="32" rx="3" fill="#2a2d33" stroke="#111"/>
+      <circle cx="6" cy="6" r="1.6" fill="#555"/><circle cx="30" cy="6" r="1.6" fill="#555"/><circle cx="6" cy="30" r="1.6" fill="#555"/><circle cx="30" cy="30" r="1.6" fill="#555"/>
+      <circle class="cap" cx="18" cy="18" r="10" fill="${c}" stroke="rgba(0,0,0,.4)" stroke-width="1.5"/>`;
+    },
+    interactive: true,
+    links: (part) => (part.pressed ? [['1', '2', 0]] : []),
+    update(part) {
+      const cap = part.el.querySelector('.cap');
+      cap.setAttribute('r', part.pressed ? 8.5 : 10);
+      cap.setAttribute('stroke-width', part.pressed ? 3 : 1.5);
+    },
+  },
+  'wokwi-slide-switch': {
+    label: 'Công tắc gạt', category: 'Cơ bản',
+    attrs: [{ key: 'value', label: 'Vị trí', type: 'select', options: ['0', '1'], default: '0', live: true }],
+    size: () => ({ w: 40, h: 44 }),
+    pins: () => rowPins(['1', '2', '3'], 8, 12, 42),
+    render() {
+      return `<line x1="8" y1="26" x2="8" y2="44" stroke="#9aa" stroke-width="1.8"/><line x1="20" y1="26" x2="20" y2="44" stroke="#9aa" stroke-width="1.8"/><line x1="32" y1="26" x2="32" y2="44" stroke="#9aa" stroke-width="1.8"/>
+      <rect x="2" y="8" width="36" height="18" rx="2" fill="#3a3f48" stroke="#222"/><rect x="5" y="12" width="30" height="10" rx="1" fill="#1d2025"/>
+      <rect class="knob" x="6" y="4" width="13" height="18" rx="2" fill="#e8e8e8" stroke="#888"/>`;
+    },
+    interactive: true,
+    links: (part) => (String(part.attrs.value) === '1' ? [['2', '3', 0]] : [['1', '2', 0]]),
+    update(part) { part.el.querySelector('.knob').setAttribute('x', String(part.attrs.value) === '1' ? 21 : 6); },
+  },
+  'wokwi-potentiometer': {
+    label: 'Biến trở', category: 'Cơ bản',
+    attrs: [{ key: 'value', label: 'Giá trị (0–1023)', type: 'range', min: 0, max: 1023, step: 1, default: 512, live: true }],
+    size: () => ({ w: 56, h: 70 }),
+    pins: () => rowPins(['GND', 'SIG', 'VCC'], 12, 16, 68),
+    render() {
+      return `<line x1="12" y1="52" x2="12" y2="70" stroke="#9aa" stroke-width="1.8"/><line x1="28" y1="52" x2="28" y2="70" stroke="#9aa" stroke-width="1.8"/><line x1="44" y1="52" x2="44" y2="70" stroke="#9aa" stroke-width="1.8"/>
+      <rect x="4" y="4" width="48" height="48" rx="4" fill="#1f5fbf" stroke="#174a94"/>
+      <circle cx="28" cy="28" r="17" fill="#c9ccd2" stroke="#888"/><circle cx="28" cy="28" r="12" fill="#e2e4e8"/>
+      <g class="knob"><rect x="26.5" y="13" width="3" height="11" rx="1" fill="#333"/></g>`;
+    },
+    links: (part) => {
+      const v = Math.max(0, Math.min(1023, Number(part.attrs.value) || 0)) / 1023;
+      return [['VCC', 'SIG', Math.max(1, 10000 * (1 - v))], ['SIG', 'GND', Math.max(1, 10000 * v)]];
+    },
+    update(part) {
+      const v = Math.max(0, Math.min(1023, Number(part.attrs.value) || 0)) / 1023;
+      part.el.querySelector('.knob').setAttribute('transform', `rotate(${-135 + v * 270} 28 28)`);
+    },
+  },
+  'wokwi-rgb-led': {
+    label: 'LED RGB', category: 'Cơ bản',
+    attrs: [{ key: 'common', label: 'Chân chung', type: 'select', options: ['cathode', 'anode'], default: 'cathode' }],
+    size: () => ({ w: 40, h: 66 }),
+    pins: () => rowPins(['R', 'COM', 'G', 'B'], 8, 8, 64),
+    render() {
+      return `<circle class="glow" cx="20" cy="17" r="16" fill="#000" opacity="0" filter="url(#glow)"/>
+      ${[8, 16, 24, 32].map((x) => `<line x1="${x}" y1="36" x2="${x}" y2="66" stroke="#9aa" stroke-width="1.6"/>`).join('')}
+      <path d="M8 36V16a12 12 0 0 1 24 0v20z" fill="#eef" opacity="0.7" stroke="#bbc" class="body"/>
+      <rect x="6" y="33" width="28" height="4" rx="1" fill="#dde" opacity="0.8"/>`;
+    },
+    update(part, ctx) {
+      const com = ctx.V('COM');
+      const ch = (p) => {
+        const v = ctx.V(p);
+        if (v == null || com == null) return 0;
+        const d = part.attrs.common === 'anode' ? com - v : v - com;
+        return Math.max(0, Math.min(1, (d - 0.3) / 2.5));
+      };
+      const r = ch('R'), g = ch('G'), b = ch('B');
+      const m = Math.max(r, g, b);
+      const col = `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
+      part.el.querySelector('.glow').setAttribute('fill', col);
+      part.el.querySelector('.glow').setAttribute('opacity', (m * 0.95).toFixed(2));
+      part.el.querySelector('.body').setAttribute('fill', m > 0.02 ? col : '#eef');
+    },
+  },
+  'wokwi-buzzer': {
+    label: 'Còi (buzzer)', category: 'Cơ bản',
+    size: () => ({ w: 40, h: 52 }),
+    pins: () => [{ name: '1', x: 15, y: 50 }, { name: '2', x: 25, y: 50 }],
+    render() {
+      return `<line x1="15" y1="34" x2="15" y2="52" stroke="#9aa" stroke-width="1.8"/><line x1="25" y1="34" x2="25" y2="52" stroke="#9aa" stroke-width="1.8"/>
+      <circle cx="20" cy="20" r="17" fill="#1b1b1b" stroke="#000"/><circle cx="20" cy="20" r="4" fill="#333"/>
+      <text x="29" y="10" font-size="7" fill="#ddd">+</text>
+      <g class="waves" opacity="0" stroke="#4aa3ff" fill="none" stroke-width="1.5"><path d="M34 8a16 16 0 0 1 0 24"/><path d="M38 4a22 22 0 0 1 0 32"/></g>`;
+    },
+    update(part, ctx) {
+      const f = ctx.toneOn('2', '1');
+      part.el.querySelector('.waves').setAttribute('opacity', f ? 1 : 0);
+      ctx.sound(part, f);
+    },
+  },
+
+  // ---------------------------------------------------------------- sensors
+  'wokwi-photoresistor-sensor': {
+    label: 'Cảm biến ánh sáng (LDR)', category: 'Cảm biến', power: ['VCC', 'GND'],
+    attrs: [{ key: 'lux', label: 'Độ sáng (lux)', type: 'range', min: 1, max: 2000, step: 1, default: 500, live: true },
+      { key: 'threshold', label: 'Ngưỡng DO (lux)', type: 'number', default: 100 }],
+    size: () => ({ w: 98, h: 38 }),
+    pins: () => [{ name: 'VCC', x: 96, y: 7 }, { name: 'GND', x: 96, y: 15 }, { name: 'DO', x: 96, y: 23 }, { name: 'AO', x: 96, y: 31 }],
+    render() {
+      return `<rect x="0" y="0" width="90" height="38" rx="3" fill="#1e3f8a"/>
+      ${['VCC', 'GND', 'DO', 'AO'].map((n, i) => `<line x1="84" y1="${7 + i * 8}" x2="98" y2="${7 + i * 8}" stroke="#d4af37" stroke-width="2"/><text x="81" y="${9 + i * 8}" text-anchor="end" font-size="5" fill="#fff">${n}</text>`).join('')}
+      <circle cx="15" cy="19" r="10" fill="#e8d9a8" stroke="#a88"/><path d="M9 15h12M9 19h12M9 23h12" stroke="#a33" stroke-width="1.2"/>
+      <rect x="34" y="9" width="12" height="12" fill="#2d6bd6" stroke="#ccc"/><circle cx="40" cy="15" r="3" fill="#eee"/>
+      <rect class="doled" x="52" y="27" width="5" height="3" fill="#300"/><rect x="52" y="20" width="5" height="3" fill="#e22"/>`;
+    },
+    drive(part, api) {
+      if (!api.powered(part)) return [];
+      const vcc = api.V('VCC');
+      const lux = Math.max(0.1, Number(part.attrs.lux) || 0.1);
+      const R = 50000 * Math.pow(10 / lux, 0.7); // RL10 = 50kΩ, gamma 0.7
+      const ao = (vcc * R) / (R + 10000);
+      const dark = lux < Number(part.attrs.threshold || 100);
+      return [{ pin: 'AO', v: ao }, { pin: 'DO', v: dark ? vcc : 0 }];
+    },
+    update(part, ctx) { part.el.querySelector('.doled').setAttribute('fill', ctx.powered() && Number(part.attrs.lux) >= Number(part.attrs.threshold || 100) ? '#2f2' : '#300'); },
+  },
+  'wokwi-dht22': {
+    label: 'DHT22 (nhiệt độ/độ ẩm)', category: 'Cảm biến', power: ['VCC', 'GND'],
+    attrs: [{ key: 'temperature', label: 'Nhiệt độ (°C)', type: 'range', min: -40, max: 80, step: 0.1, default: 24, live: true },
+      { key: 'humidity', label: 'Độ ẩm (%)', type: 'range', min: 0, max: 100, step: 0.5, default: 40, live: true }],
+    size: () => ({ w: 40, h: 72 }),
+    pins: () => rowPins(['VCC', 'SDA', 'NC', 'GND'], 8, 8, 70),
+    render() {
+      let holes = '';
+      for (let r = 0; r < 6; r++) for (let c = 0; c < 4; c++) holes += `<rect x="${7 + c * 7}" y="${7 + r * 6}" width="5" height="3.5" rx="1" fill="#9fa6b0"/>`;
+      return `${[8, 16, 24, 32].map((x) => `<line x1="${x}" y1="52" x2="${x}" y2="72" stroke="#9aa" stroke-width="1.6"/>`).join('')}
+      <rect x="2" y="2" width="36" height="52" rx="3" fill="#f2f4f6" stroke="#bbb"/>${holes}
+      <text x="20" y="49" text-anchor="middle" font-size="6" fill="#666" font-weight="bold">DHT22</text>`;
+    },
+  },
+  'wokwi-dht11': {
+    label: 'DHT11 (nhiệt độ/độ ẩm)', category: 'Cảm biến', power: ['VCC', 'GND'],
+    attrs: [{ key: 'temperature', label: 'Nhiệt độ (°C)', type: 'range', min: 0, max: 50, step: 1, default: 25, live: true },
+      { key: 'humidity', label: 'Độ ẩm (%)', type: 'range', min: 20, max: 90, step: 1, default: 50, live: true }],
+    size: () => ({ w: 40, h: 72 }),
+    pins: () => rowPins(['VCC', 'SDA', 'NC', 'GND'], 8, 8, 70),
+    render() {
+      let holes = '';
+      for (let r = 0; r < 6; r++) for (let c = 0; c < 4; c++) holes += `<rect x="${7 + c * 7}" y="${7 + r * 6}" width="5" height="3.5" rx="1" fill="#1d4f9a"/>`;
+      return `${[8, 16, 24, 32].map((x) => `<line x1="${x}" y1="52" x2="${x}" y2="72" stroke="#9aa" stroke-width="1.6"/>`).join('')}
+      <rect x="2" y="2" width="36" height="52" rx="3" fill="#3b8ae6" stroke="#246"/>${holes}
+      <text x="20" y="49" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">DHT11</text>`;
+    },
+  },
+  'wokwi-hc-sr04': {
+    label: 'HC-SR04 (siêu âm)', category: 'Cảm biến', power: ['VCC', 'GND'],
+    attrs: [{ key: 'distance', label: 'Khoảng cách (cm)', type: 'range', min: 2, max: 400, step: 1, default: 100, live: true }],
+    size: () => ({ w: 112, h: 62 }),
+    pins: () => rowPins(['VCC', 'TRIG', 'ECHO', 'GND'], 41, 10, 60),
+    render() {
+      const tr = (x) => `<circle cx="${x}" cy="24" r="18" fill="#c8ccd2" stroke="#888"/><circle cx="${x}" cy="24" r="13" fill="#3a3d42"/><circle cx="${x}" cy="24" r="10" fill="none" stroke="#555" stroke-dasharray="1.5 1.5"/>`;
+      return `${[41, 51, 61, 71].map((x) => `<line x1="${x}" y1="46" x2="${x}" y2="62" stroke="#d4af37" stroke-width="1.8"/>`).join('')}
+      <rect x="0" y="2" width="112" height="46" rx="3" fill="#1d5fb0"/>${tr(26)}${tr(86)}
+      <rect x="49" y="8" width="14" height="8" fill="#ccc"/>
+      ${['VCC', 'Trig', 'Echo', 'GND'].map((n, i) => `<text x="${41 + i * 10}" y="44" text-anchor="middle" font-size="4.2" fill="#fff">${n}</text>`).join('')}`;
+    },
+  },
+  'wokwi-pir-motion-sensor': {
+    label: 'Cảm biến chuyển động PIR', category: 'Cảm biến', power: ['VCC', 'GND'],
+    attrs: [{ key: 'motion', label: 'Chuyển động', type: 'button', text: 'Mô phỏng chuyển động (5 giây)', live: true }],
+    size: () => ({ w: 64, h: 66 }),
+    pins: () => rowPins(['VCC', 'OUT', 'GND'], 22, 10, 64),
+    render() {
+      return `${[22, 32, 42].map((x) => `<line x1="${x}" y1="52" x2="${x}" y2="66" stroke="#d4af37" stroke-width="1.8"/>`).join('')}
+      <rect x="2" y="2" width="60" height="52" rx="3" fill="#2e7d32"/>
+      <circle class="dome" cx="32" cy="28" r="22" fill="#f4f4f4" stroke="#ccc"/>
+      <path d="M14 28h36M32 10v36M19 15l26 26M45 15L19 41" stroke="#ddd" stroke-width="0.8"/>`;
+    },
+    interactive: true,
+    drive(part, api) {
+      if (!api.powered(part)) return [];
+      const on = part.motionUntil && part.motionUntil > Date.now();
+      return [{ pin: 'OUT', v: on ? api.V('VCC') : 0 }];
+    },
+    update(part) {
+      const on = part.motionUntil && part.motionUntil > Date.now();
+      part.el.querySelector('.dome').setAttribute('fill', on ? '#ffe0b0' : '#f4f4f4');
+    },
+  },
+
+  // ---------------------------------------------------------------- actuators / displays
+  'wokwi-servo': {
+    label: 'Động cơ Servo', category: 'Chấp hành',
+    size: () => ({ w: 124, h: 52 }),
+    pins: () => [{ name: 'GND', x: 2, y: 18 }, { name: 'V+', x: 2, y: 26 }, { name: 'PWM', x: 2, y: 34 }],
+    render() {
+      return `<line x1="0" y1="18" x2="22" y2="18" stroke="#6b3e1d" stroke-width="2.5"/><line x1="0" y1="26" x2="22" y2="26" stroke="#d22" stroke-width="2.5"/><line x1="0" y1="34" x2="22" y2="34" stroke="#f90" stroke-width="2.5"/>
+      <rect x="22" y="8" width="80" height="36" rx="3" fill="#2463b8" stroke="#16457f"/>
+      <rect x="14" y="20" width="8" height="12" fill="#2463b8"/><rect x="102" y="20" width="8" height="12" fill="#2463b8"/>
+      <circle cx="80" cy="26" r="11" fill="#1d4f94"/>
+      <g class="horn"><path d="M80 22 L116 24 a2.5 2.5 0 0 1 0 4 L80 30 z" fill="#f2f2f2" stroke="#999"/><circle cx="80" cy="26" r="6" fill="#f2f2f2" stroke="#999"/></g>
+      <circle cx="80" cy="26" r="2" fill="#777"/>`;
+    },
+    update(part, ctx) {
+      const a = ctx.servoAngle('PWM');
+      if (a != null && ctx.powered(['V+', 'GND'])) part.angle = a;
+      const ang = part.angle == null ? 90 : part.angle;
+      part.el.querySelector('.horn').setAttribute('transform', `rotate(${90 - ang} 80 26)`);
+    },
+  },
+  'wokwi-7segment': {
+    label: 'LED 7 đoạn', category: 'Hiển thị',
+    attrs: [{ key: 'common', label: 'Loại', type: 'select', options: ['cathode', 'anode'], default: 'cathode' },
+      { key: 'color', label: 'Màu', type: 'select', options: ['red', 'green', 'blue', 'yellow', 'white'], default: 'red' }],
+    size: () => ({ w: 60, h: 92 }),
+    pins: () => [...rowPins(['G', 'F', 'COM.1', 'A', 'B'], 10, 10, 2), ...rowPins(['E', 'D', 'COM.2', 'C', 'DP'], 10, 10, 90)],
+    render() {
+      const seg = {
+        A: 'M20 17h20', B: 'M42 19v22', C: 'M42 49v22', D: 'M20 73h20', E: 'M18 49v22', F: 'M18 19v22', G: 'M20 45h20',
+      };
+      return `${[10, 20, 30, 40, 50].map((x) => `<line x1="${x}" y1="0" x2="${x}" y2="8" stroke="#d4af37" stroke-width="1.8"/><line x1="${x}" y1="84" x2="${x}" y2="92" stroke="#d4af37" stroke-width="1.8"/>`).join('')}
+      <rect x="2" y="7" width="56" height="78" rx="2" fill="#2a2a2a"/>
+      <g transform="skewX(-6) translate(5 0)">${Object.entries(seg).map(([k, d]) => `<path class="s${k}" d="${d}" stroke="#4a2020" stroke-width="5" stroke-linecap="round"/>`).join('')}
+      <circle class="sDP" cx="50" cy="74" r="2.8" fill="#4a2020"/></g>`;
+    },
+    links: () => [['COM.1', 'COM.2', 0]],
+    update(part, ctx) {
+      const on = { red: '#ff2a2a', green: '#2aff4a', blue: '#4a8aff', yellow: '#ffe02a', white: '#fff' }[part.attrs.color] || '#ff2a2a';
+      const off = '#3a2222';
+      const com = ctx.V('COM.1');
+      for (const s of ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'DP']) {
+        const v = ctx.V(s);
+        let lit = false;
+        if (v != null && com != null) lit = part.attrs.common === 'anode' ? com - v > 1.5 : v - com > 1.5;
+        const el = part.el.querySelector('.s' + s);
+        el.setAttribute(s === 'DP' ? 'fill' : 'stroke', lit ? on : off);
+        el.setAttribute('filter', lit ? 'url(#glow2)' : '');
+      }
+    },
+  },
+  'wokwi-lcd1602': {
+    label: 'LCD 16x2 / 20x4 (I2C)', category: 'Hiển thị', power: ['VCC', 'GND'], i2c: 'lcd',
+    attrs: [{ key: 'size', label: 'Kích thước', type: 'select', options: ['16x2', '20x4'], default: '16x2' },
+      { key: 'address', label: 'Địa chỉ I2C', type: 'select', options: ['0x27', '0x3F'], default: '0x27' },
+      { key: 'color', label: 'Màu nền', type: 'select', options: ['green', 'blue'], default: 'green' }],
+    size(attrs) { const [c, r] = (attrs.size || '16x2').split('x').map(Number); return { w: c * 12 + 60, h: r * 19 + 48 }; },
+    pins(attrs) { const h = this.size(attrs).h; return rowPins(['GND', 'VCC', 'SDA', 'SCL'], 0, 0, 0).map((p, i) => ({ name: p.name, x: 3, y: h / 2 - 15 + i * 10 })); },
+    render(part) {
+      const { w, h } = this.size(part.attrs);
+      const [c, r] = (part.attrs.size || '16x2').split('x').map(Number);
+      const sw = c * 12 + 8, sh = r * 19 + 8;
+      const pinsY = this.pins(part.attrs);
+      return `<rect x="8" y="0" width="${w - 8}" height="${h}" rx="3" fill="#1b6b2a"/>
+      ${[[14, 4], [w - 6, 4], [14, h - 4], [w - 6, h - 4]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="2.6" fill="#ccc"/>`).join('')}
+      ${pinsY.map((p) => `<line x1="0" y1="${p.y}" x2="14" y2="${p.y}" stroke="#d4af37" stroke-width="2"/><text x="17" y="${p.y + 2}" font-size="5" fill="#fff">${p.name}</text>`).join('')}
+      <rect x="${(w + 8 - sw) / 2 - 8}" y="${(h - sh) / 2 - 8}" width="${sw + 16}" height="${sh + 16}" rx="2" fill="#111"/>`;
+    },
+    canvas(part) {
+      const { w, h } = this.size(part.attrs);
+      const [c, r] = (part.attrs.size || '16x2').split('x').map(Number);
+      const sw = c * 12 + 8, sh = r * 19 + 8;
+      return { x: (w + 8 - sw) / 2, y: (h - sh) / 2, w: sw, h: sh, scale: 3 };
+    },
+    draw(part, ctx2d, powered) {
+      const [cols, rows] = (part.attrs.size || '16x2').split('x').map(Number);
+      const blue = part.attrs.color === 'blue';
+      const st = part.state;
+      const lit = powered && st && st.backlight;
+      const bg = blue ? (lit ? '#2f5cff' : '#0e1f6b') : (lit ? '#9fd341' : '#4d6b1c');
+      const on = blue ? '#e8f0ff' : '#1d2a0a';
+      const offPix = blue ? (lit ? '#3a68ff' : '#13267a') : (lit ? '#93c63b' : '#4a6619');
+      const S = 3;
+      ctx2d.fillStyle = bg;
+      ctx2d.fillRect(0, 0, ctx2d.canvas.width, ctx2d.canvas.height);
+      const off = [0x00, 0x40, 0x14, 0x54];
+      const blinkOn = Math.floor(Date.now() / 500) % 2 === 0;
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          let code = 0x20;
+          let isCursor = false;
+          if (powered && st && st.on) {
+            const base = off[r];
+            const lineStart = base >= 0x40 ? 0x40 : 0x00;
+            const col = (((base - lineStart) + c + (st.shift || 0)) % 40);
+            const addr = lineStart + col;
+            code = st.ddram[addr];
+            isCursor = addr === st.addr;
+          }
+          const x0 = (4 + c * 12) * S, y0 = (4 + r * 19) * S;
+          let rowsBits;
+          if (code < 16) rowsBits = Array.from(st ? st.cgram[code & 7] : new Uint8Array(8));
+          else {
+            const g = glyph(code, 'lcd');
+            rowsBits = [];
+            for (let y = 0; y < 8; y++) { let b = 0; for (let x = 0; x < 5; x++) if ((g[x] >> y) & 1) b |= 1 << (4 - x); rowsBits.push(b); }
+          }
+          for (let y = 0; y < 8; y++) {
+            let bits = rowsBits[y] || 0;
+            if (isCursor && st.cursor && y === 7) bits = 0x1f;
+            if (isCursor && st.blink && blinkOn) bits = 0x1f;
+            for (let x = 0; x < 5; x++) {
+              ctx2d.fillStyle = (bits >> (4 - x)) & 1 ? on : offPix;
+              ctx2d.fillRect(x0 + x * 2 * S + S * 0.15, y0 + y * 2 * S + S * 0.15, 2 * S - S * 0.3, 2 * S - S * 0.3);
+            }
+          }
+        }
+      }
+    },
+  },
+  'wokwi-ssd1306': {
+    label: 'OLED SSD1306 128x64 (I2C)', category: 'Hiển thị', power: ['VCC', 'GND'], i2c: 'oled',
+    attrs: [{ key: 'address', label: 'Địa chỉ I2C', type: 'select', options: ['0x3C', '0x3D'], default: '0x3C' }],
+    size: () => ({ w: 140, h: 100 }),
+    pins: () => rowPins(['GND', 'VCC', 'SCL', 'SDA'], 49, 14, 3),
+    render() {
+      return `<rect x="0" y="0" width="140" height="100" rx="4" fill="#1a3b8c"/>
+      ${[6, 134].map((x) => [6, 94].map((y) => `<circle cx="${x}" cy="${y}" r="3" fill="#dde"/>`).join('')).join('')}
+      ${['GND', 'VCC', 'SCL', 'SDA'].map((n, i) => `<circle cx="${49 + i * 14}" cy="3" r="2.6" fill="#d4af37"/><text x="${49 + i * 14}" y="13" text-anchor="middle" font-size="5" fill="#fff">${n}</text>`).join('')}
+      <rect x="4" y="16" width="132" height="80" rx="1" fill="#0b0b0b"/>`;
+    },
+    canvas: () => ({ x: 6, y: 24, w: 128, h: 64, scale: 2 }),
+    draw(part, ctx2d, powered) {
+      const st = part.state;
+      const W = 128, H = 64, S = 2;
+      ctx2d.fillStyle = '#05070a';
+      ctx2d.fillRect(0, 0, W * S, H * S);
+      if (!powered || !st || !st.on) return;
+      ctx2d.fillStyle = '#9ad8ff';
+      const inv = st.inverted;
+      if (inv) { ctx2d.fillRect(0, 0, W * S, H * S); ctx2d.fillStyle = '#05070a'; }
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (st.fb[y * st.w + x]) ctx2d.fillRect(x * S, y * S, S, S);
+    },
+  },
+  'wokwi-neopixel-strip': {
+    label: 'NeoPixel (WS2812) dải LED', category: 'Hiển thị', power: ['VDD', 'VSS'],
+    attrs: [{ key: 'pixels', label: 'Số LED', type: 'number', default: 8, min: 1, max: 32 }],
+    size: (a) => ({ w: 18 + Math.max(1, Math.min(32, Number(a.pixels) || 8)) * 24, h: 38 }),
+    pins: () => [{ name: 'DIN', x: 2, y: 11 }, { name: 'VDD', x: 2, y: 19 }, { name: 'VSS', x: 2, y: 27 }],
+    render(part) {
+      const n = Math.max(1, Math.min(32, Number(part.attrs.pixels) || 8));
+      const w = 18 + n * 24;
+      let s = `<rect x="6" y="2" width="${w - 6}" height="34" rx="3" fill="#ececec" stroke="#bbb"/>
+      ${['DIN', 'VDD', 'VSS'].map((nm, i) => `<line x1="0" y1="${11 + i * 8}" x2="10" y2="${11 + i * 8}" stroke="#d4af37" stroke-width="2"/>`).join('')}`;
+      for (let i = 0; i < n; i++) s += `<rect x="${14 + i * 24}" y="8" width="20" height="20" rx="2" fill="#fafafa" stroke="#ccc"/><circle class="px${i}" cx="${24 + i * 24}" cy="18" r="6" fill="#ddd"/>`;
+      return s;
+    },
+    update(part, ctx) {
+      const n = Math.max(1, Math.min(32, Number(part.attrs.pixels) || 8));
+      const st = part.state;
+      const pw = ctx.powered();
+      for (let i = 0; i < n; i++) {
+        const c = pw && st && st.colors[i] ? st.colors[i] : [0, 0, 0];
+        const m = Math.max(...c);
+        const el = part.el.querySelector('.px' + i);
+        if (!el) continue;
+        el.setAttribute('fill', m > 2 ? `rgb(${c.map((x) => Math.min(255, Math.round(x * (255 / Math.max(m, 1)) * Math.min(1, 0.4 + m / 160)))).join(',')})` : '#ddd');
+        el.setAttribute('filter', m > 2 ? 'url(#glow2)' : '');
+      }
+    },
+  },
+};
+
+export function partDef(type) { return PARTS[type]; }
+export function partSize(part) { return PARTS[part.type].size(part.attrs); }
+export function partPins(part) { return PARTS[part.type].pins(part.attrs); }
+export function defaultAttrs(type) {
+  const o = {};
+  for (const a of PARTS[type].attrs || []) if (a.default !== undefined) o[a.key] = a.default;
+  return o;
+}
+export { esc };

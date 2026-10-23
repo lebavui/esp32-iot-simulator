@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ESP32 IoT Simulator</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='6' y='3' width='20' height='26' rx='3' fill='%2320232a'/%3E%3Crect x='10' y='6' width='12' height='10' fill='%23b9bec6'/%3E%3Ccircle cx='16' cy='23' r='3' fill='%233da5ff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="vendor/codemirror/codemirror.min.css">
+  <link rel="stylesheet" href="vendor/codemirror/material-darker.min.css">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="vendor/codemirror/codemirror.min.js"></script>
+  <script src="vendor/codemirror/mode/clike.min.js"></script>
+  <script src="vendor/codemirror/mode/javascript.min.js"></script>
+  <script src="vendor/codemirror/addon/matchbrackets.min.js"></script>
+  <script src="vendor/codemirror/addon/closebrackets.min.js"></script>
+  <script src="vendor/codemirror/addon/active-line.min.js"></script>
+  <script src="vendor/mqtt.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">⚡</span> ESP32 <b>IoT Simulator</b></div>
+    <input id="projectName" class="project-name" value="Dự án ESP32" spellcheck="false" title="Tên dự án">
+    <div class="top-actions">
+      <select id="exampleSelect" title="Mở ví dụ mẫu"><option value="">📚 Ví dụ mẫu…</option></select>
+      <button id="btnNew" title="Dự án mới">＋ Mới</button>
+      <button id="btnOpen" title="Mở file dự án (.json)">📂 Mở</button>
+      <button id="btnSave" title="Tải dự án về máy (.json)">💾 Lưu</button>
+      <button id="btnShare" title="Tạo link chia sẻ">🔗 Chia sẻ</button>
+      <button id="btnSettings" title="Cài đặt">⚙</button>
+      <button id="btnHelp" title="Hướng dẫn">?</button>
+      <input type="file" id="fileInput" accept=".json,.ino,.txt" hidden>
+    </div>
+  </header>
+
+  <main class="layout" id="layout">
+    <section class="pane code-pane" id="codePane">
+      <div class="tabs" id="codeTabs">
+        <button class="tab active" data-tab="sketch">sketch.ino</button>
+        <button class="tab" data-tab="diagram">diagram.json</button>
+        <span class="tabs-spacer"></span>
+        <span class="hint" id="cursorPos"></span>
+      </div>
+      <div class="editor-wrap"><textarea id="codeArea"></textarea></div>
+      <div class="problems" id="problems" hidden>
+        <div class="problems-head"><span id="problemsTitle">Lỗi biên dịch</span><button id="problemsClose" title="Đóng">✕</button></div>
+        <div class="problems-list" id="problemsList"></div>
+      </div>
+    </section>
+
+    <div class="gutter gutter-v" id="gutterV" title="Kéo để thay đổi kích thước"></div>
+
+    <section class="pane sim-pane" id="simPane">
+      <div class="sim-toolbar">
+        <button id="btnRun" class="run" title="Biên dịch và chạy (Ctrl+Enter)">▶</button>
+        <button id="btnStop" class="stop" title="Dừng" disabled>■</button>
+        <button id="btnRestart" title="Khởi động lại" disabled>↻</button>
+        <span class="sim-time" id="simTime">00:00.000</span>
+        <span class="sim-status" id="simStatus">Sẵn sàng</span>
+        <span class="wifi-badge" id="wifiBadge" hidden title="WiFi đã kết nối">📶 WiFi</span>
+        <span class="tabs-spacer"></span>
+        <button id="btnAddPart" class="add-part" title="Thêm linh kiện">＋ Linh kiện</button>
+        <button id="btnZoomOut" title="Thu nhỏ">−</button>
+        <button id="btnZoomIn" title="Phóng to">＋</button>
+        <button id="btnFit" title="Vừa khung">⤢</button>
+      </div>
+      <div class="sim-area">
+        <div class="canvas" id="canvas"></div>
+        <div class="inspector" id="inspector" hidden></div>
+        <div class="canvas-hint">Kéo thả linh kiện • Bấm vào chân để nối dây • Bấm nền để thêm điểm gấp • Esc hủy • R xoay • Delete xóa</div>
+      </div>
+      <div class="gutter gutter-h" id="gutterH"></div>
+      <div class="bottom" id="bottom">
+        <div class="tabs" id="bottomTabs">
+          <button class="tab active" data-tab="serial">Serial Monitor</button>
+          <button class="tab" data-tab="mqtt">MQTT Client</button>
+          <button class="tab" data-tab="net">Nhật ký mạng <span class="badge" id="netBadge" hidden>0</span></button>
+          <span class="tabs-spacer"></span>
+          <label class="chk"><input type="checkbox" id="autoscroll" checked> Tự cuộn</label>
+          <button id="btnClear" title="Xóa">🗑</button>
+        </div>
+        <div class="bottom-body">
+          <div class="panel active" data-panel="serial">
+            <pre class="serial-out" id="serialOut"></pre>
+            <div class="serial-in">
+              <input id="serialInput" placeholder="Gửi dữ liệu tới ESP32 (Enter)…" autocomplete="off">
+              <select id="lineEnding" title="Ký tự kết thúc dòng">
+                <option value="\n">LF</option><option value="">Không</option><option value="\r">CR</option><option value="\r\n">CR+LF</option>
+              </select>
+              <button id="serialSend">Gửi</button>
+            </div>
+          </div>
+          <div class="panel" data-panel="mqtt">
+            <div class="mqtt">
+              <div class="mqtt-row">
+                <select id="mqttBroker"></select>
+                <input id="mqttUrl" placeholder="wss://broker:port/mqtt">
+                <button id="mqttConnect">Kết nối</button>
+                <span class="mqtt-state" id="mqttState">● Chưa kết nối</span>
+              </div>
+              <div class="mqtt-row">
+                <input id="mqttSubTopic" value="esp32sim/demo/#" placeholder="Topic subscribe (hỗ trợ + #)">
+                <button id="mqttSub">Subscribe</button>
+                <span id="mqttSubs" class="mqtt-subs"></span>
+              </div>
+              <div class="mqtt-row">
+                <input id="mqttPubTopic" value="esp32sim/demo/led" placeholder="Topic publish">
+                <input id="mqttPubMsg" value="on" placeholder="Payload">
+                <label class="chk"><input type="checkbox" id="mqttRetain"> retain</label>
+                <button id="mqttPub">Publish</button>
+              </div>
+              <div class="mqtt-log" id="mqttLog"></div>
+            </div>
+          </div>
+          <div class="panel" data-panel="net"><div class="net-log" id="netLog"></div></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal" id="partModal" hidden>
+    <div class="modal-box wide">
+      <div class="modal-head"><b>Thêm linh kiện</b><input id="partSearch" placeholder="Tìm…"><button class="modal-close">✕</button></div>
+      <div class="part-grid" id="partGrid"></div>
+    </div>
+  </div>
+
+  <div class="modal" id="settingsModal" hidden>
+    <div class="modal-box">
+      <div class="modal-head"><b>Cài đặt</b><button class="modal-close">✕</button></div>
+      <div class="modal-body">
+        <label class="field">Proxy HTTP (tránh lỗi CORS)
+          <select id="setProxy"><option value="auto">Tự động (dùng nếu server.js đang chạy)</option><option value="off">Tắt – gọi trực tiếp từ trình duyệt</option></select>
+          <small id="proxyStatus"></small>
+        </label>
+        <label class="field">Ánh xạ MQTT broker → WebSocket (mỗi dòng: host = url)
+          <textarea id="setBrokers" rows="6" spellcheck="false"></textarea>
+          <small>Trình duyệt không mở được TCP cổng 1883, nên <code>client.setServer("host", 1883)</code> sẽ được nối qua WebSocket theo bảng này.</small>
+        </label>
+        <label class="chk"><input type="checkbox" id="setSound" checked> Phát âm thanh còi (buzzer)</label>
+        <label class="chk"><input type="checkbox" id="setTimestamps"> Hiện thời gian trên Serial Monitor</label>
+        <div class="modal-actions"><button id="settingsSave" class="primary">Lưu</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="helpModal" hidden>
+    <div class="modal-box wide">
+      <div class="modal-head"><b>Hướng dẫn sử dụng</b><button class="modal-close">✕</button></div>
+      <div class="modal-body help" id="helpBody"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

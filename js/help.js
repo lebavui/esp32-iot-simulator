@@ -1,0 +1,55 @@
+export const HELP_HTML = `
+<h3>Bắt đầu nhanh</h3>
+<ul>
+  <li>Chọn một <b>Ví dụ mẫu</b> ở thanh trên cùng, rồi bấm <b>▶</b> (hoặc <code>Ctrl+Enter</code>) để biên dịch và chạy.</li>
+  <li>Viết code Arduino (C/C++) trong tab <b>sketch.ino</b> với <code>setup()</code> và <code>loop()</code> như trên Arduino IDE.</li>
+  <li>Kết quả <code>Serial.print</code> hiện ở <b>Serial Monitor</b>; có thể gửi dữ liệu xuống ESP32 qua ô nhập bên dưới.</li>
+  <li>Dự án được tự động lưu trong trình duyệt. Dùng <b>💾 Lưu</b> để tải file .json (Shift+bấm để tải .ino), <b>🔗 Chia sẻ</b> để tạo link.</li>
+</ul>
+<h3>Lắp mạch</h3>
+<ul>
+  <li><b>＋ Linh kiện</b> để thêm linh kiện; kéo thả để di chuyển; phím <code>R</code> xoay, <code>Delete</code> xóa.</li>
+  <li>Nối dây: bấm vào một chân (di chuột lên chân để xem tên), bấm vào nền để thêm điểm gấp, bấm vào chân thứ hai để kết thúc. <code>Esc</code>/chuột phải để hủy.</li>
+  <li>Chọn dây để đổi màu/xóa; nháy đúp lên dây để thêm điểm gấp, kéo điểm gấp để chỉnh.</li>
+  <li>Khi đang chạy: nhấn giữ <b>nút nhấn</b>, bấm <b>công tắc gạt</b>, bấm <b>PIR</b> để mô phỏng chuyển động; chọn cảm biến (DHT22, LDR, HC-SR04, biến trở) để kéo thanh trượt thay đổi giá trị đo.</li>
+  <li>Mô phỏng điện: điện trở, điện trở kéo lên/xuống nội (<code>INPUT_PULLUP</code>), cầu phân áp, biến trở được giải theo định luật Ohm; phát hiện ngắn mạch. LED/7 đoạn/RGB sáng theo chênh lệch điện áp (PWM điều chỉnh độ sáng).</li>
+  <li>Linh kiện I2C (LCD, OLED) phải nối SDA→GPIO21, SCL→GPIO22 (hoặc chân trong <code>Wire.begin(sda, scl)</code>) và cấp nguồn VCC/GND.</li>
+</ul>
+<h3>Linh kiện</h3>
+<table>
+<tr><td>Cơ bản</td><td>LED (nhiều màu), LED RGB, điện trở, nút nhấn, công tắc gạt, biến trở, còi buzzer</td></tr>
+<tr><td>Cảm biến</td><td>DHT22/DHT11, HC-SR04, cảm biến ánh sáng LDR (AO/DO), PIR</td></tr>
+<tr><td>Hiển thị</td><td>LED 7 đoạn (anode/cathode chung), LCD 16x2 / 20x4 I2C, OLED SSD1306 128x64 I2C, NeoPixel WS2812</td></tr>
+<tr><td>Chấp hành</td><td>Servo</td></tr>
+</table>
+<h3>Thư viện & API được hỗ trợ</h3>
+<table>
+<tr><td>Arduino core</td><td>pinMode, digitalWrite/Read, analogRead (12 bit), analogWrite, ledcAttach/ledcWrite (v3) & ledcSetup/ledcAttachPin (v2), tone/noTone, pulseIn, millis/micros/delay, attachInterrupt, map/constrain/random, toán học, String, sprintf/snprintf, dtostrf, strcpy/strcmp…</td></tr>
+<tr><td>Serial</td><td>begin, print/println (DEC/HEX/BIN, số chữ số thập phân), printf, write, available, read, readString, readStringUntil, parseInt, parseFloat</td></tr>
+<tr><td>WiFi.h</td><td>WiFi.begin (mọi SSID đều kết nối vào AP ảo), status, localIP, RSSI, macAddress, scanNetworks, disconnect</td></tr>
+<tr><td>HTTPClient.h</td><td>begin, addHeader, GET, POST, PUT, PATCH, sendRequest, getString, errorToString, setAuthorization, end</td></tr>
+<tr><td>PubSubClient.h</td><td>setServer, setCallback, connect (id, user, pass, will), publish, subscribe, unsubscribe, loop, connected, state</td></tr>
+<tr><td>ArduinoJson.h</td><td>JsonDocument / StaticJsonDocument / DynamicJsonDocument, doc["key"], as&lt;T&gt;(), is&lt;T&gt;(), | mặc định, createNestedObject/Array, add, serializeJson(Pretty), deserializeJson, duyệt range-for</td></tr>
+<tr><td>Hiển thị</td><td>LiquidCrystal_I2C, Adafruit_SSD1306 + Adafruit_GFX (vẽ điểm/đường/hình/chữ/bitmap), Adafruit_NeoPixel</td></tr>
+<tr><td>Cảm biến/khác</td><td>DHT.h, DHTesp.h, ESP32Servo.h, Wire.h (máy quét I2C), Preferences.h (lưu NVS vào trình duyệt), time.h (configTime, getLocalTime, strftime), FreeRTOS (xTaskCreate, vTaskDelay, vTaskDelete), ESP.restart/getFreeHeap</td></tr>
+</table>
+<h3>Ghi chú về mạng</h3>
+<ul>
+  <li>Trình duyệt không mở được socket TCP, vì vậy MQTT được nối qua <b>WebSocket</b>: <code>client.setServer("broker.hivemq.com", 1883)</code> tự động dùng <code>wss://broker.hivemq.com:8884/mqtt</code>. Xem/sửa bảng ánh xạ trong ⚙ Cài đặt.</li>
+  <li>Dùng tab <b>MQTT Client</b> để subscribe/publish cùng broker và tương tác với ESP32 ảo.</li>
+  <li>HTTP được thực hiện bằng <code>fetch</code>. Khi chạy bằng <code>node server.js</code>, yêu cầu được chuyển qua proxy cục bộ nên không bị lỗi CORS và gọi được cả <code>http://</code>.</li>
+  <li>Tab <b>Nhật ký mạng</b> ghi lại mọi sự kiện WiFi / HTTP / MQTT của thiết bị.</li>
+</ul>
+<h3>Giới hạn</h3>
+<ul>
+  <li>Code được biên dịch sang JavaScript (không giả lập tập lệnh Xtensa), nên thời gian thực thi không chính xác theo chu kỳ máy; <code>delay()</code>, <code>millis()</code> theo thời gian thực.</li>
+  <li>Chưa hỗ trợ: lớp tự định nghĩa có phương thức, template, cấp phát động (new/delete), con trỏ số học phức tạp, goto.</li>
+</ul>
+<h3>Phím tắt</h3>
+<table>
+<tr><td>Ctrl+Enter</td><td>Biên dịch và chạy</td></tr>
+<tr><td>Ctrl+S</td><td>Lưu vào trình duyệt</td></tr>
+<tr><td>R / Delete</td><td>Xoay / xóa linh kiện hoặc dây đang chọn</td></tr>
+<tr><td>Lăn chuột</td><td>Phóng to/thu nhỏ; kéo nền để di chuyển</td></tr>
+</table>
+`;
