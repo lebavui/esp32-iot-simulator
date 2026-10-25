@@ -1,0 +1,17 @@
+services:
+  esp32sim:
+    # Image lấy từ Docker Hub; DOCKERHUB_USER và TAG đặt trong file .env (xem .env.example)
+    image: ${DOCKERHUB_USER:?Cần đặt DOCKERHUB_USER trong .env}/esp32-iot-simulator:${TAG:-latest}
+    container_name: esp32sim
+    restart: unless-stopped
+    # Chỉ mở cổng cho nginx trên chính VPS; bên ngoài truy cập qua https://iot.lebavui.io.vn
+    # Cổng 8020 trên VPS (8080 đã có dịch vụ khác) → cổng 8080 trong container
+    ports:
+      - "127.0.0.1:8020:8080"
+    environment:
+      - PROXY_BLOCK_PRIVATE=1
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

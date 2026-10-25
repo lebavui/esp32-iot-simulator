@@ -1,0 +1,13 @@
+.git
+.gitignore
+.dockerignore
+node_modules
+tests
+deploy
+Dockerfile
+docker-compose.yml
+*.log
+.DS_Store
+Thumbs.db
+.env
+.env.example

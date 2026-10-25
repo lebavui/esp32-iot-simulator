@@ -2,9 +2,13 @@
 // Serves the web app and provides an HTTP proxy (/__proxy) so simulated HTTPClient requests
 // are not blocked by browser CORS / mixed-content rules.
 // Usage: node server.js [port]      (default 8080, listens on 127.0.0.1 only)
+// Env: HOST (bind address), PORT, PROXY_BLOCK_PRIVATE=1 (proxy refuses loopback/private/link-local
+// targets — set this when the server is public, e.g. in Docker, so /__proxy cannot reach internal hosts).
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
+import net from 'net';
+import dns from 'dns/promises';
 import { fileURLToPath } from 'url';
 
 const PORT = Number(process.argv[2] || process.env.PORT || 8080);
@@ -16,6 +20,41 @@ const MIME = {
   '.png': 'image/png', '.ico': 'image/x-icon', '.md': 'text/plain; charset=utf-8', '.ino': 'text/plain; charset=utf-8',
 };
 const MAX_BODY = 2 * 1024 * 1024;
+const BLOCK_PRIVATE = /^(1|true|yes|on)$/i.test(process.env.PROXY_BLOCK_PRIVATE || '');
+const MAX_REDIRECTS = 5;
+
+function isPrivateIp(ip) {
+  if (net.isIPv6(ip)) {
+    const a = ip.toLowerCase();
+    // '::…' covers ::, ::1 and IPv4-mapped/compatible forms (URL parsing turns ::ffff:127.0.0.1 into ::ffff:7f00:1)
+    return a.startsWith('::') || /^f[cd]/.test(a) || /^fe[89ab]/.test(a) || /^ff/.test(a);
+  }
+  const [a, b] = ip.split('.').map(Number);
+  return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || (a === 198 && (b === 18 || b === 19));
+}
+
+// Throws when the URL's host is (or resolves to) a non-public address.
+async function checkTarget(url) {
+  const host = new URL(url).hostname.replace(/^\[|\]$/g, '');
+  const addrs = net.isIP(host) ? [host] : (await dns.lookup(host, { all: true })).map((r) => r.address);
+  if (!addrs.length || addrs.some(isPrivateIp)) throw new Error('Địa chỉ nội bộ bị chặn');
+}
+
+// fetch() that re-checks every redirect hop when BLOCK_PRIVATE is on.
+async function proxyFetch(url, opts) {
+  if (!BLOCK_PRIVATE) return fetch(url, { ...opts, redirect: 'follow' });
+  for (let hop = 0; ; hop++) {
+    await checkTarget(url);
+    const r = await fetch(url, { ...opts, redirect: 'manual' });
+    const loc = r.headers.get('location');
+    if (r.status < 300 || r.status >= 400 || !loc) return r;
+    if (hop >= MAX_REDIRECTS) throw new Error('too many redirects');
+    url = new URL(loc, url).href;
+    if (!/^https?:\/\//i.test(url)) throw new Error('URL không hợp lệ');
+    if (r.status === 303 || ((r.status === 301 || r.status === 302) && opts.method.toUpperCase() === 'POST')) opts = { ...opts, method: 'GET', body: undefined };
+  }
+}
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -38,11 +77,10 @@ async function handleProxy(req, res) {
     if (!/^https?:\/\//i.test(url || '')) return send({ error: 'URL không hợp lệ' });
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 15000);
-    const r = await fetch(url, {
+    const r = await proxyFetch(url, {
       method,
       headers,
       body: body != null && !['GET', 'HEAD'].includes(method.toUpperCase()) ? Buffer.from(body, 'base64') : undefined,
-      redirect: 'follow',
       signal: ctrl.signal,
     });
     const buf = Buffer.from(await r.arrayBuffer());
@@ -74,5 +112,5 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`ESP32 IoT Simulator: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/`);
-  console.log('HTTP proxy đang bật tại /__proxy (chỉ cho máy cục bộ).');
+  console.log(`HTTP proxy đang bật tại /__proxy${BLOCK_PRIVATE ? ' (chặn địa chỉ nội bộ)' : ' (chỉ cho máy cục bộ)'}.`);
 });

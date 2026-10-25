@@ -51,7 +51,7 @@ The board is chosen with the `#boardSelect` dropdown (boards are hidden from the
 - `route.js`: orthogonal wire router (`routeWires(parts, wires)` fills `points` of wires that have `null`): each wire leaves its pin straight out of the part, then A* over the channel lines around the part boxes, costed by length, bends, crossings/overlaps with wires of *other* nets (same-net wires may share paths) — first pass in order, then rip-up-and-reroute passes with a rising crossing cost (`COST`). Used for new wires without hand-placed bends, wires of a moved/rotated part (unless their bends were edited, `w.manual`), and by `port.js`.
 
 ### Other
-- `server.js`: static file server + `/__proxy` HTTP proxy (bound to 127.0.0.1) so simulated `HTTPClient` avoids CORS. MQTT goes over WebSocket via mqtt.js; TCP broker addresses are mapped to WS URLs (mapping editable in settings).
+- `server.js`: static file server + `/__proxy` HTTP proxy (bound to 127.0.0.1) so simulated `HTTPClient` avoids CORS. Env: `HOST`, `PORT`, `PROXY_BLOCK_PRIVATE=1` (proxy refuses loopback/private/link-local targets, re-checked on each redirect — set in the Docker image for public deployment; see `DEPLOY.md`: image built and pushed to Docker Hub by `deploy/push.ps1`, VPS runs `docker-compose.yml` + `.env` behind nginx from `deploy/`). MQTT goes over WebSocket via mqtt.js; TCP broker addresses are mapped to WS URLs (mapping editable in settings).
 - `js/examples.js`: `EXAMPLES` (id, code, diagram) — also the main test corpus, so new features should usually get an example.
 
 ## Known limitations (by design)
