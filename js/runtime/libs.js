@@ -167,7 +167,7 @@ export class WiFiClass {
   channel(i) { return i === undefined ? 6 : [6, 1, 11, 6][i] || 1; }
   async scanNetworks() {
     await this.R.delay(1500);
-    this.$scan = [['Wokwi-GUEST', -42, 0], ['ESP32-Lab', -58, 3], ['IoT-Class', -67, 3], ['CafeWiFi', -80, 3]];
+    this.$scan = [['ESP32-IoT-GUEST', -42, 0], ['ESP32-Lab', -58, 3], ['IoT-Class', -67, 3], ['CafeWiFi', -80, 3]];
     return this.$scan.length;
   }
   scanDelete() { this.$scan = null; }
@@ -580,9 +580,11 @@ TmStruct.meta = { fields: { tm_sec: 'int', tm_min: 'int', tm_hour: 'int', tm_mda
 
 // ---------------------------------------------------------------- Wire / ESP / Preferences
 export class TwoWire {
-  constructor(R) { this.R = R; this.addr = 0; this.$pins(21, 22); }
+  // default pins: SDA/SCL of the board's pins_arduino.h (21/22 on the ESP32 DevKit)
+  constructor(R) { this.R = R; this.addr = 0; this.$pins(this.$def('SDA', 21), this.$def('SCL', 22)); }
+  $def(name, fallback) { const c = this.R.board && this.R.board.consts; return c && c[name] != null ? c[name] : fallback; }
   $pins(sda, scl) { this.R.i2c = { sda, scl }; if (this.R.sim) this.R.sim.i2cPins = this.R.i2c; }
-  begin(sda, scl) { if (sda !== undefined && sda >= 0) this.$pins(sda, scl === undefined ? 22 : scl); return true; }
+  begin(sda, scl) { if (sda !== undefined && sda >= 0) this.$pins(sda, scl === undefined ? this.$def('SCL', 22) : scl); return true; }
   setPins(sda, scl) { this.$pins(sda, scl); return true; }
   setClock() {}
   end() { return true; }
@@ -604,17 +606,17 @@ export class EspClass {
   getMaxAllocHeap() { return 110580; }
   getFreePsram() { return 0; }
   getPsramSize() { return 0; }
-  getChipModel() { return 'ESP32-D0WD-V3'; }
-  getChipRevision() { return 3; }
-  getChipCores() { return 2; }
-  getCpuFreqMHz() { return 240; }
+  getChipModel() { return this.R.chip.model; }
+  getChipRevision() { return this.R.chip.revision; }
+  getChipCores() { return this.R.chip.cores; }
+  getCpuFreqMHz() { return this.R.chip.mhz; }
   getFlashChipSize() { return 4194304; }
   getFlashChipSpeed() { return 40000000; }
   getSketchSize() { return 286720; }
   getFreeSketchSpace() { return 1310720; }
   getSdkVersion() { return 'v5.1.4'; }
   getEfuseMac() { return 0x1001C40A24; }
-  getCycleCount() { return Math.floor(this.R.millis() * 240000) >>> 0; }
+  getCycleCount() { return Math.floor(this.R.millis() * this.R.chip.mhz * 1000) >>> 0; }
   deepSleep(us) { this.R.io.log('info', `ESP.deepSleep(${us}) — mô phỏng bằng khởi động lại.`); this.R.io.restart(); }
 }
 EspClass.meta = { ret: { getFreeHeap: 'u32', getHeapSize: 'u32', getMinFreeHeap: 'u32', getMaxAllocHeap: 'u32', getChipModel: 'cstr', getChipRevision: 'u8', getChipCores: 'u8', getCpuFreqMHz: 'u32', getFlashChipSize: 'u32', getSketchSize: 'u32', getFreeSketchSpace: 'u32', getSdkVersion: 'cstr', getEfuseMac: 'i64', getCycleCount: 'u32', getFlashChipSpeed: 'u32', getFreePsram: 'u32', getPsramSize: 'u32' } };
@@ -650,20 +652,20 @@ Preferences.meta = { ret: { begin: 'bool', getInt: 'int', getUInt: 'u32', getLon
 export class DHT {
   constructor(R, pin, type) { this.R = R; this.pin = pin; this.type = type; }
   begin() {}
-  $part() { return this.R.sim.findOnPin(['wokwi-dht22', 'wokwi-dht11'], 'SDA', this.pin); }
+  $part() { return this.R.sim.findOnPin(['esp32-iot-dht22', 'esp32-iot-dht11'], 'SDA', this.pin); }
   read() { return !!this.$part(); }
   readTemperature(f) {
     const p = this.$part();
     if (!p) return NaN;
     let t = Number(p.attrs.temperature);
-    if (p.type === 'wokwi-dht11') t = Math.round(t);
+    if (p.type === 'esp32-iot-dht11') t = Math.round(t);
     return f ? t * 1.8 + 32 : t;
   }
   readHumidity() {
     const p = this.$part();
     if (!p) return NaN;
     const h = Number(p.attrs.humidity);
-    return p.type === 'wokwi-dht11' ? Math.round(h) : h;
+    return p.type === 'esp32-iot-dht11' ? Math.round(h) : h;
   }
   computeHeatIndex(t, h, isF) { return heatIndex(t, h, isF === undefined ? true : isF); }
   convertCtoF(c) { return c * 1.8 + 32; }
@@ -992,7 +994,7 @@ export class Adafruit_NeoPixel {
   fill(c, first, count) { first = first || 0; count = count || this.n - first; for (let i = first; i < first + count; i++) this.setPixelColor(i, c); }
   clear() { for (const p of this.px) p.fill(0); }
   show() {
-    const part = this.R.sim.findOnPin(['wokwi-neopixel-strip'], 'DIN', this.pin);
+    const part = this.R.sim.findOnPin(['esp32-iot-neopixel-strip'], 'DIN', this.pin);
     if (!part) { this.R.warnOnce('neo' + this.pin, `NeoPixel trên GPIO${this.pin} không tìm thấy (nối DIN, VDD, VSS).`); return; }
     const k = this.bright / 255;
     part.state = { kind: 'neopixel', colors: this.px.map(([r, g, b]) => [r * k, g * k, b * k]), dirty: true };

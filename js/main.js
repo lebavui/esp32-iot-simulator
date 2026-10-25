@@ -4,6 +4,8 @@ import { Runtime } from './runtime/runtime.js';
 import { Circuit } from './circuit/circuit.js';
 import { DiagramEditor, WIRE_COLORS } from './circuit/editor.js';
 import { PARTS, defaultAttrs } from './circuit/parts.js';
+import { BOARDS, DEFAULT_BOARD } from './boards.js';
+import { portProject } from './port.js';
 import { EXAMPLES } from './examples.js';
 import { DEFAULT_BROKERS } from './runtime/libs.js';
 import { binToBytes, utf8ToBin } from './runtime/format.js';
@@ -25,11 +27,12 @@ void loop() {
   delay(10);
 }
 `;
-const BLANK_DIAGRAM = { version: 1, parts: [{ type: 'wokwi-esp32-devkit-v1', id: 'esp', top: 0, left: 0, attrs: {} }], connections: [] };
+const BLANK_DIAGRAM = { version: 1, parts: [{ type: 'esp32-iot-esp32-devkit-v1', id: 'esp', top: 0, left: 0, attrs: {} }], connections: [] };
 
 // ---------------------------------------------------------------- settings
-const settings = Object.assign({ proxy: 'auto', brokers: {}, sound: true, timestamps: false }, safeJson(localStorage.getItem(SETTINGS_KEY)) || {});
-function saveSettings() { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ proxy: settings.proxy, brokers: settings.brokers, sound: settings.sound, timestamps: settings.timestamps })); }
+const settings = Object.assign({ proxy: 'auto', brokers: {}, sound: true, timestamps: false, board: DEFAULT_BOARD }, safeJson(localStorage.getItem(SETTINGS_KEY)) || {});
+if (!BOARDS[settings.board]) settings.board = DEFAULT_BOARD;
+function saveSettings() { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ proxy: settings.proxy, brokers: settings.brokers, sound: settings.sound, timestamps: settings.timestamps, board: settings.board })); }
 function safeJson(s) { try { return JSON.parse(s); } catch { return null; } }
 
 // ---------------------------------------------------------------- code editor
@@ -54,7 +57,7 @@ let runtime = null;
 let running = false;
 let needsRender = true;
 const editor = new DiagramEditor($('canvas'), circuit, {
-  onChange: () => { needsRender = true; scheduleSave(); if (activeCodeTab === 'diagram' && !cm.hasFocus()) diagramDoc.setValue(diagramText()); },
+  onChange: () => { needsRender = true; scheduleSave(); syncBoardSelect(); if (activeCodeTab === 'diagram' && !cm.hasFocus()) diagramDoc.setValue(diagramText()); },
   onSelect: (item) => renderInspector(item),
   isRunning: () => running,
   onInteract: (part, phase) => interact(part, phase),
@@ -63,7 +66,8 @@ const editor = new DiagramEditor($('canvas'), circuit, {
 circuit.onShort = (shorts) => sysLog('warn', `⚠ Ngắn mạch: ${shorts.map((s) => `${s.a} ↔ ${s.b}`).join(', ')}`);
 
 function interact(part, phase) {
-  if (part.type === 'wokwi-pushbutton') {
+  // push buttons and the boards' BOOT button
+  if (part.type === 'esp32-iot-pushbutton' || PARTS[part.type].board) {
     // keep very short clicks pressed for at least 120 ms so polling/debounce code can see them
     if (phase === 'down') { part.pressed = true; part.pressedAt = performance.now(); }
     else {
@@ -72,8 +76,8 @@ function interact(part, phase) {
       part.pressed = false;
     }
   }
-  else if (part.type === 'wokwi-slide-switch' && phase === 'down') part.attrs.value = String(part.attrs.value) === '1' ? '0' : '1';
-  else if (part.type === 'wokwi-pir-motion-sensor' && phase === 'down') triggerMotion(part);
+  else if (part.type === 'esp32-iot-slide-switch' && phase === 'down') part.attrs.value = String(part.attrs.value) === '1' ? '0' : '1';
+  else if (part.type === 'esp32-iot-pir-motion-sensor' && phase === 'down') triggerMotion(part);
   circuit.invalidate();
   circuit.ensure();
   needsRender = true;
@@ -100,6 +104,7 @@ function loadProject(p) {
   if (activeCodeTab === 'diagram') diagramDoc.setValue(diagramText());
   clearMarks();
   showProblems([]);
+  syncBoardSelect();
   requestAnimationFrame(() => editor.fit());
   needsRender = true;
   saveLocal();
@@ -114,7 +119,7 @@ function applyDiagramText() {
   const d = safeJson(diagramDoc.getValue());
   if (!d || !Array.isArray(d.parts)) { toast('diagram.json không hợp lệ — giữ nguyên sơ đồ hiện tại'); return false; }
   const before = JSON.stringify(editor.serialize());
-  if (JSON.stringify(d) !== before) { editor.load(d); needsRender = true; scheduleSave(); }
+  if (JSON.stringify(d) !== before) { editor.load(d); needsRender = true; scheduleSave(); syncBoardSelect(); }
   return true;
 }
 
@@ -314,7 +319,7 @@ function run() {
   $('simStatus').textContent = 'Đang biên dịch…';
   let res;
   try {
-    res = compile(src);
+    res = compile(src, { board: circuit.boardType() || undefined });
   } catch (e) {
     showProblems([{ type: 'error', line: e.line, col: e.col, msg: e.message }]);
     setRunningUI(false, 'Lỗi biên dịch', 'error');
@@ -322,13 +327,13 @@ function run() {
     return;
   }
   showProblems(res.warnings.map((w) => ({ type: 'warn', line: w.line, msg: w.msg })));
-  if (!circuit.board()) { toast('Sơ đồ chưa có ESP32 — hãy thêm "ESP32 DevKit V1"'); setRunningUI(false, 'Thiếu ESP32', 'error'); return; }
+  if (!circuit.board()) { toast('Sơ đồ chưa có board — hãy thêm một board trong mục "Vi điều khiển"'); setRunningUI(false, 'Thiếu board', 'error'); return; }
   ensureAudio();
   serialOut.innerHTML = '';
   serialQueue = [];
   decoder = new TextDecoder('utf-8');
   atLineStart = true;
-  for (const p of editor.parts) { p.pressed = p.pressed && p.type === 'wokwi-pushbutton' ? p.pressed : false; }
+  for (const p of editor.parts) { p.pressed = p.pressed && p.type === 'esp32-iot-pushbutton' ? p.pressed : false; }
   const rt = new Runtime({
     sim: circuit,
     settings: { proxy: settings.proxy, proxyAvailable: settings.proxyAvailable, proxyUrl: settings.proxyUrl, brokers: settings.brokers },
@@ -340,7 +345,7 @@ function run() {
       },
       net: netLog,
       wifi: (on) => { $('wifiBadge').hidden = !on; },
-      restart: () => setTimeout(() => { sysLog('info', '— ESP32 khởi động lại —'); run(); }, 50),
+      restart: () => setTimeout(() => { sysLog('info', '— Board khởi động lại —'); run(); }, 50),
       onStopped: (fromError) => { if (rt === runtime) { setRunningUI(false, fromError ? 'Dừng do lỗi' : 'Đã dừng', fromError ? 'error' : ''); stopSounds(); } },
     },
   });
@@ -366,6 +371,7 @@ function partCtx(part) {
   return {
     running,
     V: (pin) => (running ? circuit.V(part, pin) : null),
+    gpio: (n) => (running ? circuit.gpios.get(n) || null : null),
     powered: (pins) => running && circuit.isPowered(part, pins),
     servoAngle: (pin) => {
       const g = circuit.gpioOnNet(part, pin);
@@ -444,7 +450,7 @@ function renderInspector(item) {
     return;
   }
   const def = PARTS[item.type];
-  box.innerHTML = `<h4>${def.label}</h4><div class="sub">id: ${item.id}${item.type === 'wokwi-esp32-devkit-v1' ? ' • LED_BUILTIN = GPIO2' : ''}</div>`;
+  box.innerHTML = `<h4>${def.label}</h4><div class="sub">id: ${item.id}${def.board ? boardSummary(item.type) : ''}</div>`;
   for (const a of def.attrs || []) {
     const f = document.createElement('label');
     f.className = 'field';
@@ -487,14 +493,22 @@ function renderInspector(item) {
     }
     box.append(f);
   }
-  if (item.type === 'wokwi-pushbutton') box.insertAdjacentHTML('beforeend', '<div class="field" style="font-size:11px">Khi đang chạy: nhấn giữ chuột lên nút để nhấn.</div>');
-  if (item.type === 'wokwi-slide-switch') box.insertAdjacentHTML('beforeend', '<div class="field" style="font-size:11px">Khi đang chạy: bấm lên công tắc để gạt.</div>');
+  if (def.interactive && def.board) box.insertAdjacentHTML('beforeend', `<div class="field" style="font-size:11px">Khi đang chạy: nhấn giữ chuột lên board để nhấn nút BOOT (GPIO${BOARDS[item.type].boot.gpio}).</div>`);
+  if (item.type === 'esp32-iot-pushbutton') box.insertAdjacentHTML('beforeend', '<div class="field" style="font-size:11px">Khi đang chạy: nhấn giữ chuột lên nút để nhấn.</div>');
+  if (item.type === 'esp32-iot-slide-switch') box.insertAdjacentHTML('beforeend', '<div class="field" style="font-size:11px">Khi đang chạy: bấm lên công tắc để gạt.</div>');
   const row = document.createElement('div');
   row.className = 'row';
   row.innerHTML = '<button id="insRot" title="Xoay (R)">⟳ Xoay</button><button class="danger" id="insDel" title="Xóa (Delete)">🗑 Xóa</button>';
   box.append(row);
   $('insRot').onclick = () => editor.rotateSelected();
   $('insDel').onclick = () => editor.deleteSelected();
+}
+
+function boardSummary(type) {
+  const b = BOARDS[type];
+  const c = b.consts || { SDA: 21, SCL: 22 };
+  const led = b.led ? `LED_BUILTIN = GPIO${b.led.gpio}${b.led.activeLow ? ' (sáng khi LOW)' : ''}` : 'không có LED_BUILTIN';
+  return ` • ${led} • I2C: SDA=GPIO${c.SDA}, SCL=GPIO${c.SCL}`;
 }
 
 // ---------------------------------------------------------------- part palette
@@ -504,6 +518,7 @@ function openPalette() {
   const q = $('partSearch').value.trim().toLowerCase();
   const cats = {};
   for (const [type, def] of Object.entries(PARTS)) {
+    if (def.board) continue; // boards are chosen with the board dropdown
     if (q && !(def.label.toLowerCase().includes(q) || type.includes(q))) continue;
     (cats[def.category] = cats[def.category] || []).push([type, def]);
   }
@@ -536,31 +551,84 @@ $('btnZoomIn').onclick = () => { const r = $('canvas').getBoundingClientRect(); 
 $('btnZoomOut').onclick = () => { const r = $('canvas').getBoundingClientRect(); editor.zoomAt(1 / 1.2, r.width / 2, r.height / 2); };
 $('btnFit').onclick = () => editor.fit();
 
+// ---------------------------------------------------------------- board
+const boardSel = $('boardSelect');
+for (const [type, b] of Object.entries(BOARDS)) boardSel.add(new Option(b.label, type));
+boardSel.add(new Option('⚠ Chưa có board', ''));
+const selectedBoard = () => circuit.boardType() || settings.board;
+function syncBoardSelect() {
+  const t = circuit.boardType();
+  boardSel.value = t || '';
+  boardSel.lastChild.hidden = !!t;
+  if (t && t !== settings.board) { settings.board = t; saveSettings(); }
+}
+// a project moved to the selected board: pins re-assigned, wires moved, pin numbers in the sketch rewritten
+function onBoard(p, board) {
+  const r = portProject(p, board);
+  return { ...p, code: r.code, diagram: r.diagram, port: r };
+}
+function portSummary(r) {
+  const s = [];
+  if (r.moves.length) s.push('đổi chân ' + r.moves.join(', '));
+  if (r.added.length) s.push('thêm ' + r.added.join(', '));
+  if (r.lost.length || r.dropped) s.push(`⚠ không đủ chân: bỏ ${r.lost.length + r.dropped} kết nối`);
+  return s.join('; ');
+}
+boardSel.onchange = () => {
+  const board = boardSel.value;
+  if (!board) { syncBoardSelect(); return; }
+  if (activeCodeTab === 'diagram') applyDiagramText();
+  const cur = currentProject();
+  const p = onBoard(cur, board);
+  if (p.code !== cur.code && !isExampleCode(cur.code) && !window.confirm(`Chuyển sang ${BOARDS[board].label}: số chân trong code sẽ được sửa theo board mới (${portSummary(p.port)}). Tiếp tục?`)) { syncBoardSelect(); return; }
+  settings.board = board;
+  saveSettings();
+  stop();
+  if (p.code !== cur.code) sketchDoc.setValue(p.code); // still undoable with Ctrl+Z
+  editor.load(p.diagram);
+  if (activeCodeTab === 'diagram') diagramDoc.setValue(diagramText());
+  syncBoardSelect();
+  clearMarks();
+  showProblems([]);
+  requestAnimationFrame(() => editor.fit());
+  needsRender = true;
+  saveLocal();
+  const sum = portSummary(p.port);
+  toast(`Board: ${BOARDS[board].label}` + (sum ? ' — ' + sum : ''));
+  if (sum) sysLog('info', `Chuyển sang ${BOARDS[board].label}: ${sum}`);
+};
+
 const exSel = $('exampleSelect');
-let lastCat = null;
-let group = null;
+const groups = new Map();   // one group per category, in order of first appearance
 for (const ex of EXAMPLES) {
-  if (ex.category !== lastCat) { group = document.createElement('optgroup'); group.label = ex.category; exSel.append(group); lastCat = ex.category; }
+  if (!groups.has(ex.category)) { const g = document.createElement('optgroup'); g.label = ex.category; exSel.append(g); groups.set(ex.category, g); }
   const o = document.createElement('option');
   o.value = ex.id;
   o.textContent = ex.name;
-  group.append(o);
+  groups.get(ex.category).append(o);
 }
 exSel.onchange = () => {
   const ex = EXAMPLES.find((e) => e.id === exSel.value);
   exSel.value = '';
   if (!ex) return;
   if (!confirmReplace()) return;
-  loadProject({ name: ex.name.replace(/^\d+\.\s*/, ''), code: ex.code, diagram: JSON.parse(JSON.stringify(ex.diagram)) });
-  toast('Đã mở ví dụ: ' + ex.name);
+  const board = selectedBoard();
+  const p = onBoard(ex, board);
+  loadProject({ name: ex.name.replace(/^\d+\.\s*/, ''), code: p.code, diagram: p.diagram });
+  const sum = p.port.changed ? portSummary(p.port) : '';
+  toast('Đã mở ví dụ: ' + ex.name + (p.port.changed ? ` (chuyển sang ${BOARDS[board].label}${sum ? ': ' + sum : ''})` : ''));
+  if (sum) sysLog('info', `Ví dụ "${ex.name}" viết cho ${BOARDS[ex.diagram.parts[0].type].label}, đã chuyển sang ${BOARDS[board].label}: ${sum}`);
 };
+// code of an example (as written, or moved to any board) or the blank sketch: replacing it needs no confirmation
+function isExampleCode(code) {
+  return code === BLANK_CODE || EXAMPLES.some((e) => e.code === code || Object.keys(BOARDS).some((b) => portProject(e, b, { route: false }).code === code));
+}
 function confirmReplace() {
   const saved = safeJson(localStorage.getItem(STORE_KEY));
   if (!saved) return true;
-  const isExample = EXAMPLES.some((e) => e.code === saved.code) || saved.code === BLANK_CODE;
-  return isExample || window.confirm('Thay thế dự án hiện tại? (Hãy "Lưu" trước nếu cần giữ lại)');
+  return isExampleCode(saved.code) || window.confirm('Thay thế dự án hiện tại? (Hãy "Lưu" trước nếu cần giữ lại)');
 }
-$('btnNew').onclick = () => { if (confirmReplace()) loadProject({ name: 'Dự án mới', code: BLANK_CODE, diagram: BLANK_DIAGRAM }); };
+$('btnNew').onclick = () => { if (confirmReplace()) loadProject({ name: 'Dự án mới', code: BLANK_CODE, diagram: onBoard({ diagram: BLANK_DIAGRAM }, selectedBoard()).diagram }); };
 $('btnSave').onclick = (e) => {
   const p = currentProject();
   const name = (p.name || 'esp32-project').replace(/[^\w\-À-ỹ ]+/g, '').trim() || 'esp32-project';
@@ -689,7 +757,7 @@ const mqttPanel = new MqttPanel({
   const saved = safeJson(localStorage.getItem(STORE_KEY));
   if (shared) { loadProject(shared); toast('Đã mở dự án từ link chia sẻ'); history.replaceState(null, '', location.pathname); }
   else if (saved && saved.diagram) loadProject(saved);
-  else { const ex = EXAMPLES[0]; loadProject({ name: ex.name.replace(/^\d+\.\s*/, ''), code: ex.code, diagram: JSON.parse(JSON.stringify(ex.diagram)) }); }
+  else { const ex = EXAMPLES[0]; const p = onBoard(ex, settings.board); loadProject({ name: ex.name.replace(/^\d+\.\s*/, ''), code: p.code, diagram: p.diagram }); }
   setTimeout(() => editor.fit(), 50);
 })();
 window.addEventListener('resize', () => cm.refresh());

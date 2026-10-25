@@ -2,6 +2,7 @@
 // cooperative scheduler (delay/yield/tasks/interrupts).
 import { fmtFloat, fmtInt, cFormat, strftime, bytesToBin, binToBytes } from './format.js';
 import { LIBS, JsonDocument, JsonSlot, DeserializationError, TmStruct, jsonSafe } from './libs.js';
+import { boardInfo } from '../boards.js';
 
 export class StopSignal { constructor() { this.stop = true; } }
 export class TaskExit { constructor() { this.taskExit = true; } }
@@ -17,10 +18,6 @@ if (typeof MessageChannel !== 'undefined') {
   macrotask = () => new Promise((r) => { q.push(r); ch.port2.postMessage(0); });
 } else macrotask = () => new Promise((r) => setTimeout(r, 0));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-const ADC1 = [32, 33, 34, 35, 36, 37, 38, 39];
-const ADC2 = [0, 2, 4, 12, 13, 14, 15, 25, 26, 27];
-const VALID_GPIO = [0, 1, 2, 3, 4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33, 34, 35, 36, 39];
 
 function isPlainJson(v) {
   return Array.isArray(v) || (v !== null && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype);
@@ -40,6 +37,9 @@ export class Runtime {
 
   // ---------- lifecycle ----------
   reset() {
+    // board in the diagram (DevKit when the sim doesn't say, e.g. tests/harness.mjs fakeSim)
+    this.board = boardInfo(this.sim.boardType ? this.sim.boardType() : null);
+    this.chip = this.board.chip;
     this.t0 = now();
     this.lastYield = now();
     this.stopped = false;
@@ -120,12 +120,7 @@ export class Runtime {
     if (this.io.onStopped) this.io.onStopped(fromError);
   }
 
-  bootBanner() {
-    const s = 'ets Jun  8 2016 00:22:57\r\n\r\nrst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)\r\n' +
-      'configsip: 0, SPIWP:0xee\r\nclk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00\r\n' +
-      'mode:DIO, clock div:2\r\nload:0x3fff0030,len:1156\r\nload:0x40078000,len:11456\r\nentry 0x400805a4\r\n';
-    this.io.serialWrite(0, s, true);
-  }
+  bootBanner() { this.io.serialWrite(0, this.chip.banner, true); }
 
   warnOnce(key, msg) {
     if (this.warned.has(key)) return;
@@ -462,9 +457,9 @@ export class Runtime {
 
   // ---------- Arduino core functions ----------
   checkPin(pin, what) {
-    if (!VALID_GPIO.includes(pin)) {
-      if (pin >= 6 && pin <= 11) this.warnOnce('flash' + pin, `GPIO${pin} được nối với flash SPI — không dùng được trên ESP32.`);
-      else this.warnOnce('pin' + pin, `GPIO${pin} không tồn tại trên ESP32 DevKit (${what}).`);
+    if (!this.chip.gpios.includes(pin)) {
+      if (this.chip.flash.includes(pin)) this.warnOnce('flash' + pin, `GPIO${pin} được nối với flash SPI — không dùng được trên ${this.chip.name}.`);
+      else this.warnOnce('pin' + pin, `GPIO${pin} không tồn tại trên ${this.board.label} (${what}).`);
       return false;
     }
     return true;
@@ -492,8 +487,8 @@ export class Runtime {
     const F = {
       pinMode(pin, mode) {
         if (!R.checkPin(pin, 'pinMode')) return;
-        if ((mode & 0x02) && pin >= 34) R.warnOnce('in' + pin, `GPIO${pin} chỉ là chân INPUT — không thể cấu hình OUTPUT.`);
-        if ((mode === 0x05 || mode === 0x09) && pin >= 34) R.warnOnce('pu' + pin, `GPIO${pin} không có điện trở kéo lên/xuống nội.`);
+        if ((mode & 0x02) && R.chip.inputOnly.includes(pin)) R.warnOnce('in' + pin, `GPIO${pin} chỉ là chân INPUT — không thể cấu hình OUTPUT.`);
+        if ((mode === 0x05 || mode === 0x09) && R.chip.inputOnly.includes(pin)) R.warnOnce('pu' + pin, `GPIO${pin} không có điện trở kéo lên/xuống nội.`);
         R.sim.pinMode(pin, mode);
       },
       digitalWrite(pin, val) {
@@ -507,8 +502,14 @@ export class Runtime {
         return R.sim.digitalRead(pin);
       },
       analogRead(pin) {
-        if (!ADC1.includes(pin) && !ADC2.includes(pin)) { R.warnOnce('adc' + pin, `GPIO${pin} không phải chân ADC.`); return 0; }
-        if (ADC2.includes(pin) && R.wifi.status === 3) R.warnOnce('adc2' + pin, `GPIO${pin} thuộc ADC2 — trên ESP32 thật không đọc được khi WiFi đang bật. Nên dùng chân ADC1 (32–39).`);
+        const { adc1, adc2, adc2Note, name } = R.chip;
+        const adc1Range = `${adc1[0]}–${adc1[adc1.length - 1]}`;
+        if (!adc1.includes(pin) && !adc2.includes(pin)) { R.warnOnce('adc' + pin, `GPIO${pin} không phải chân ADC của ${name} (ADC1: GPIO${adc1Range}).`); return 0; }
+        if (adc2.includes(pin) && adc2Note === 'unusable') { R.warnOnce('adc2' + pin, `GPIO${pin} thuộc ADC2 — ${name} không đọc được ADC2 (lỗi phần cứng), analogRead trả về 0. Dùng chân ADC1 (GPIO${adc1Range}).`); return 0; }
+        if (adc2.includes(pin) && R.wifi.status === 3) {
+          R.warnOnce('adc2' + pin, adc2Note === 'wifi' ? `GPIO${pin} thuộc ADC2 — trên ${name} thật không đọc được khi WiFi đang bật. Nên dùng chân ADC1 (GPIO${adc1Range}).`
+            : `GPIO${pin} thuộc ADC2 — trên ${name} thật đọc ADC2 có thể thất bại khi WiFi đang bật. Nên dùng chân ADC1 (GPIO${adc1Range}).`);
+        }
         const v = R.sim.readVoltage(pin);
         const max = (1 << R.adcBits) - 1;
         if (v == null) return Math.round(Math.random() * 40);
@@ -521,7 +522,7 @@ export class Runtime {
       analogWriteResolution(bits) { R.pwmBits = bits; },
       analogWrite(pin, val) {
         if (!R.checkPin(pin, 'analogWrite')) return;
-        if (pin >= 34) { R.warnOnce('aw' + pin, `GPIO${pin} không xuất PWM được.`); return; }
+        if (R.chip.inputOnly.includes(pin)) { R.warnOnce('aw' + pin, `GPIO${pin} không xuất PWM được.`); return; }
         ledcApply(pin, val, R.pwmBits, 1000);
       },
       ledcSetup(ch, freq, res) { R.ledc.channels.set(ch, { freq, res, pins: new Set(), duty: 0 }); return freq; },
@@ -683,8 +684,8 @@ export class Runtime {
       memcmp(a, b, n) { for (let i = 0; i < n; i++) { if (a[i] !== b[i]) return a[i] - b[i]; } return 0; },
       F: (s) => s, PSTR: (s) => s,
       temperatureRead: () => 48.9,
-      hallRead: () => 0,
-      touchRead: () => 72,
+      hallRead() { if (!R.chip.hall) R.warnOnce('hall', `${R.chip.name} không có cảm biến Hall — hallRead() không dùng được.`); return 0; },
+      touchRead() { if (!R.chip.touch) R.warnOnce('touch', `${R.chip.name} không có chân cảm ứng (touch) — touchRead() không dùng được.`); return 72; },
       xTaskCreate(fn, name, stack, param, prio, handle) {
         if (handle && typeof handle === 'object' && 'v' in handle) handle.v = { task: str(name) };
         return R.startTask(fn, param, str(name));
@@ -694,7 +695,7 @@ export class Runtime {
       async vTaskDelete(h) { if (h == null) { R.checkStop(); throw new TaskExit(); } },
       vTaskSuspend() {}, vTaskResume() {},
       pdMS_TO_TICKS: (ms) => ms,
-      xPortGetCoreID: () => 1,
+      xPortGetCoreID: () => (R.chip.cores > 1 ? 1 : 0),
       uxTaskGetStackHighWaterMark: () => 1024,
       xTaskGetTickCount: () => R.millis() >>> 0,
       async taskYIELD() { await R.h.y(true); },

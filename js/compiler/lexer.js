@@ -229,7 +229,8 @@ function expandMacros(tokens, defines) {
   return out;
 }
 
-export function preprocessAndTokenize(source) {
+// extraDefines: board-specific predefined macros (e.g. CONFIG_IDF_TARGET_ESP32C3)
+export function preprocessAndTokenize(source, extraDefines = '') {
   const defines = new Map();
   const includes = [];
   const all = [];
@@ -312,7 +313,7 @@ export function preprocessAndTokenize(source) {
     flush(lines.length + 1);
     if (cond.length) throw new CompileError('unterminated #if', lines.length);
   };
-  run(PREDEFINED, true);
+  run(PREDEFINED + extraDefines, true);
   run(source, false);
   // Arduino's F() macro and similar wrappers are handled as functions; expand user macros.
   const expanded = expandMacros(all, defines);

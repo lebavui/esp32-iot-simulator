@@ -13,10 +13,12 @@ export const HELP_HTML = `
   <li>Chọn dây để đổi màu/xóa; nháy đúp lên dây để thêm điểm gấp, kéo điểm gấp để chỉnh.</li>
   <li>Khi đang chạy: nhấn giữ <b>nút nhấn</b>, bấm <b>công tắc gạt</b>, bấm <b>PIR</b> để mô phỏng chuyển động; chọn cảm biến (DHT22, LDR, HC-SR04, biến trở) để kéo thanh trượt thay đổi giá trị đo.</li>
   <li>Mô phỏng điện: điện trở, điện trở kéo lên/xuống nội (<code>INPUT_PULLUP</code>), cầu phân áp, biến trở được giải theo định luật Ohm; phát hiện ngắn mạch. LED/7 đoạn/RGB sáng theo chênh lệch điện áp (PWM điều chỉnh độ sáng).</li>
-  <li>Linh kiện I2C (LCD, OLED) phải nối SDA→GPIO21, SCL→GPIO22 (hoặc chân trong <code>Wire.begin(sda, scl)</code>) và cấp nguồn VCC/GND.</li>
+  <li>Linh kiện I2C (LCD, OLED) phải nối vào chân SDA/SCL mặc định của board — ESP32 DevKit: GPIO21/22, XIAO ESP32-C3: D4/D5 (GPIO6/7), XIAO ESP32-S3: D4/D5 (GPIO5/6), C3 SuperMini: GPIO8/9 — hoặc chân trong <code>Wire.begin(sda, scl)</code>, và cấp nguồn VCC/GND.</li>
+  <li>Đổi board bằng ô chọn board trên thanh công cụ: sơ đồ và code được chuyển sang board mới — I2C sang chân SDA/SCL của board, đầu vào analog sang chân ADC1, các chân khác giữ nguyên số GPIO nếu board có (hoặc vị trí D0…D10 giữa hai board XIAO), số chân trong code được sửa theo; board không có LED trên board / nút BOOT thì thêm LED / nút nhấn ngoài. Các thay đổi được ghi trong Serial Monitor. Ví dụ mẫu luôn được mở theo board đang chọn. Chọn board trên sơ đồ để xem <code>LED_BUILTIN</code> và chân I2C của nó.</li>
 </ul>
 <h3>Linh kiện</h3>
 <table>
+<tr><td>Vi điều khiển</td><td>ESP32 DevKit V1; Seeed XIAO ESP32-C3 (không có LED_BUILTIN); Seeed XIAO ESP32-S3 (LED_BUILTIN = GPIO21, sáng khi LOW); ESP32-C3 SuperMini (LED_BUILTIN = GPIO8, sáng khi LOW). Trên các board C3, nhấn giữ chuột lên board khi đang chạy = nhấn nút BOOT (GPIO9). Hằng số chân (<code>A0</code>, <code>D0</code>…, <code>SDA</code>, <code>LED_BUILTIN</code>) theo <code>pins_arduino.h</code> của từng board.</td></tr>
 <tr><td>Cơ bản</td><td>LED (nhiều màu), LED RGB, điện trở, nút nhấn, công tắc gạt, biến trở, còi buzzer</td></tr>
 <tr><td>Cảm biến</td><td>DHT22/DHT11, HC-SR04, cảm biến ánh sáng LDR (AO/DO), PIR</td></tr>
 <tr><td>Hiển thị</td><td>LED 7 đoạn (anode/cathode chung), LCD 16x2 / 20x4 I2C, OLED SSD1306 128x64 I2C, NeoPixel WS2812</td></tr>

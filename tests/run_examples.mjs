@@ -16,15 +16,16 @@ for (const ex of EXAMPLES) {
   let out = '';
   const logs = [];
   const R = new Runtime({ sim, settings: {}, io: { serialWrite: (p, s, boot) => { if (!boot) out += s; }, log: (l, m) => logs.push(l + ': ' + m), net: (k, m) => logs.push(k + ': ' + m), wifi() {}, restart() {}, onStopped() {} } });
-  const { code } = compile(ex.code);
+  const board = ex.diagram.parts.find((p) => /esp32|xiao/.test(p.type));
+  const { code } = compile(ex.code, { board: board && board.type });
   const pr = R.start(code);
   const snaps = [];
   const iv = setInterval(() => {
     sim.ensure();
     const vals = parts.filter((p) => /led|7seg|servo/.test(p.type)).map((p) => {
-      if (p.type === 'wokwi-led') return p.id + '=' + (sim.V(p, 'A') ?? '-') + '/' + (sim.V(p, 'C') ?? '-');
-      if (p.type === 'wokwi-7segment') return 'seg:' + ['A','B','C','D','E','F','G'].map((s) => (sim.V(p, s) > 1.5 ? 1 : 0)).join('');
-      if (p.type === 'wokwi-servo') return 'servo=' + (sim.gpioOnNet(p, 'PWM') || {}).servo;
+      if (p.type === 'esp32-iot-led') return p.id + '=' + (sim.V(p, 'A') ?? '-') + '/' + (sim.V(p, 'C') ?? '-');
+      if (p.type === 'esp32-iot-7segment') return 'seg:' + ['A','B','C','D','E','F','G'].map((s) => (sim.V(p, s) > 1.5 ? 1 : 0)).join('');
+      if (p.type === 'esp32-iot-servo') return 'servo=' + (sim.gpioOnNet(p, 'PWM') || {}).servo;
       return '';
     });
     snaps.push(vals.join(' ') + (process.env.DBG ? ' g4=' + JSON.stringify(sim.gpios.get(4)) : ''));
@@ -32,7 +33,7 @@ for (const ex of EXAMPLES) {
   await new Promise((r) => setTimeout(r, ms));
   clearInterval(iv);
   // poke inputs for some examples
-  const lcd = parts.find((p) => p.type === 'wokwi-lcd1602');
+  const lcd = parts.find((p) => p.type === 'esp32-iot-lcd1602');
   R.stop();
   await pr;
   console.log('=== ' + ex.id);
@@ -40,9 +41,9 @@ for (const ex of EXAMPLES) {
   if (logs.length) console.log('LOGS:', logs.slice(0, 5).join(' || '));
   console.log('SNAP:', [...new Set(snaps)].slice(0, 4).join(' | '));
   if (lcd && lcd.state) console.log('LCD:', [0, 0x40].map((a) => String.fromCharCode(...lcd.state.ddram.slice(a, a + 16))).join(' / '));
-  const oled = parts.find((p) => p.type === 'wokwi-ssd1306');
+  const oled = parts.find((p) => p.type === 'esp32-iot-ssd1306');
   if (oled) console.log('OLED pixels on:', oled.state ? oled.state.fb.reduce((a, b) => a + b, 0) : 'no state');
-  const strip = parts.find((p) => p.type === 'wokwi-neopixel-strip');
+  const strip = parts.find((p) => p.type === 'esp32-iot-neopixel-strip');
   if (strip) console.log('STRIP:', strip.state ? JSON.stringify(strip.state.colors.slice(0, 2).map((c) => c.map(Math.round))) : 'none');
 }
 process.exit(0);

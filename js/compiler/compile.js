@@ -4,6 +4,7 @@ import { parse } from './parser.js';
 import { generate } from './codegen.js';
 import { LIBS } from '../runtime/libs.js';
 import { JSON_VALUE_TYPES } from '../runtime/meta.js';
+import { BOARDS, DEFAULT_BOARD, boardConsts } from '../boards.js';
 
 const EXTRA_TYPES = ['TaskHandle_t', 'SemaphoreHandle_t', 'QueueHandle_t', 'TimerHandle_t', 'hw_timer_t', 'portMUX_TYPE',
   'esp_err_t', 'TickType_t', 'BaseType_t', 'UBaseType_t', 'time_t'];
@@ -15,10 +16,16 @@ const SUPPORTED_HEADERS = [
   'stdlib.h', 'string.h', 'esp_system.h', 'freertos/FreeRTOS.h', 'freertos/task.h', 'esp_wifi.h', 'WiFiMulti.h', 'esp_timer.h',
 ];
 
-export function compile(source) {
-  const { tokens, includes } = preprocessAndTokenize(source);
+// board: part type of the microcontroller board in the diagram (its pins_arduino.h constants and target macros)
+export function compile(source, { board = DEFAULT_BOARD } = {}) {
+  const b = BOARDS[board] || BOARDS[DEFAULT_BOARD];
+  const consts = boardConsts(board);
+  // like the variants' "#define LED_BUILTIN LED_BUILTIN", so #ifdef LED_BUILTIN works where the board has one
+  const hasLed = b.consts ? b.consts.LED_BUILTIN != null : true;
+  const defines = b.defines.map((d) => `#define ${d} 1\n`).join('') + (hasLed ? '#define LED_BUILTIN LED_BUILTIN\n' : '');
+  const { tokens, includes } = preprocessAndTokenize(source, defines);
   const ast = parse(tokens, [...Object.keys(LIBS), ...JSON_VALUE_TYPES, ...EXTRA_TYPES]);
-  const { code, warnings } = generate(ast, LIBS);
+  const { code, warnings } = generate(ast, LIBS, consts);
   for (const inc of includes) {
     if (!SUPPORTED_HEADERS.includes(inc.name)) warnings.push({ msg: `#include <${inc.name}>: thư viện này chưa được trình giả lập hỗ trợ đầy đủ`, line: inc.line });
   }

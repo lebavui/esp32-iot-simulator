@@ -1,12 +1,12 @@
 {
   "name": "esp32-iot-simulator",
   "version": "1.0.0",
-  "description": "Web-based ESP32 simulator (Wokwi-like) with Arduino-style programming, electronic parts, HTTP and MQTT",
+  "description": "Web-based ESP32 simulator with Arduino-style programming, electronic parts, HTTP and MQTT",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test": "node tests/compile_examples.mjs && node tests/run_examples.mjs"
+    "test": "node tests/compile_examples.mjs && node tests/run_examples.mjs && node tests/t_boards.mjs && node tests/t_port.mjs"
   },
   "license": "MIT"
 }

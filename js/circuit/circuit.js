@@ -2,7 +2,8 @@
 // Wires and closed switches merge pins into nets (union-find). Strong drivers (power pins, GPIO outputs,
 // sensor outputs) fix net voltages; resistors / pull-ups / potentiometers form a linear network that is
 // solved exactly (nodal analysis). Nets with no path to a driver are floating (null).
-import { PARTS, ESP32_GPIO, partPins } from './parts.js';
+import { PARTS, partPins } from './parts.js';
+import { BOARDS, isBoard } from '../boards.js';
 
 const PULL_R = 45000;
 
@@ -27,9 +28,12 @@ export class Circuit {
     this.invalidate();
   }
 
-  board() { return this.parts.find((p) => p.type === 'wokwi-esp32-devkit-v1'); }
+  // the microcontroller board (one per diagram) and its header pin → GPIO map
+  board() { return this.parts.find((p) => isBoard(p.type)); }
+  boardType() { const b = this.board(); return b ? b.type : null; }
+  boardGpio() { const b = this.board(); return b ? BOARDS[b.type].gpio : {}; }
   boardPinOfGpio(gpio) {
-    for (const [name, g] of Object.entries(ESP32_GPIO)) if (g === gpio) return name;
+    for (const [name, g] of Object.entries(this.boardGpio())) if (g === gpio) return name;
     return null;
   }
 
@@ -104,7 +108,7 @@ export class Circuit {
     if (!b || !name || state !== 1) return 0;
     const net = this.net(b, name);
     for (const p of this.parts) {
-      if (p.type !== 'wokwi-hc-sr04' || this.net(p, 'ECHO') !== net || !this.isPowered(p)) continue;
+      if (p.type !== 'esp32-iot-hc-sr04' || this.net(p, 'ECHO') !== net || !this.isPowered(p)) continue;
       const trigNet = this.net(p, 'TRIG');
       let triggered = false;
       for (const [gp, g] of this.gpios) {
@@ -128,7 +132,8 @@ export class Circuit {
     this.ensure();
     const b = this.board();
     if (!b) return null;
-    const i2c = this.i2cPins || { sda: 21, scl: 22 };
+    const c = BOARDS[b.type].consts;
+    const i2c = this.i2cPins || (c ? { sda: c.SDA, scl: c.SCL } : { sda: 21, scl: 22 });
     const sdaNet = this.net(b, this.boardPinOfGpio(i2c.sda));
     const sclNet = this.net(b, this.boardPinOfGpio(i2c.scl));
     return this.parts.find((p) => {
@@ -305,7 +310,7 @@ export class Circuit {
     } else this.lastShort = '';
     this.shorts = shorts;
     if (b && this.running) {
-      for (const [name, gp] of Object.entries(ESP32_GPIO)) {
+      for (const [name, gp] of Object.entries(BOARDS[b.type].gpio)) {
         const n = netOf.get(this.key(b, name));
         const g = this.gpios.get(gp);
         let lvl;

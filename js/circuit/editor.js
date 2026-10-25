@@ -1,12 +1,13 @@
 // Diagram editor: parts placement, wiring, pan/zoom, selection, property inspector.
 import { PARTS, partSize, partPins, defaultAttrs } from './parts.js';
+import { routeWires } from './route.js';
 
 const ID_PREFIX = {
-  'wokwi-esp32-devkit-v1': 'esp', 'wokwi-led': 'led', 'wokwi-resistor': 'r', 'wokwi-pushbutton': 'btn',
-  'wokwi-slide-switch': 'sw', 'wokwi-potentiometer': 'pot', 'wokwi-rgb-led': 'rgb', 'wokwi-buzzer': 'bz',
-  'wokwi-photoresistor-sensor': 'ldr', 'wokwi-dht22': 'dht', 'wokwi-dht11': 'dht', 'wokwi-hc-sr04': 'ultrasonic',
-  'wokwi-pir-motion-sensor': 'pir', 'wokwi-servo': 'servo', 'wokwi-7segment': 'sevseg', 'wokwi-lcd1602': 'lcd',
-  'wokwi-ssd1306': 'oled', 'wokwi-neopixel-strip': 'strip',
+  'esp32-iot-esp32-devkit-v1': 'esp', 'esp32-iot-led': 'led', 'esp32-iot-resistor': 'r', 'esp32-iot-pushbutton': 'btn',
+  'esp32-iot-slide-switch': 'sw', 'esp32-iot-potentiometer': 'pot', 'esp32-iot-rgb-led': 'rgb', 'esp32-iot-buzzer': 'bz',
+  'esp32-iot-photoresistor-sensor': 'ldr', 'esp32-iot-dht22': 'dht', 'esp32-iot-dht11': 'dht', 'esp32-iot-hc-sr04': 'ultrasonic',
+  'esp32-iot-pir-motion-sensor': 'pir', 'esp32-iot-servo': 'servo', 'esp32-iot-7segment': 'sevseg', 'esp32-iot-lcd1602': 'lcd',
+  'esp32-iot-ssd1306': 'oled', 'esp32-iot-neopixel-strip': 'strip',
 };
 export const WIRE_COLORS = ['green', 'red', 'black', 'blue', 'yellow', 'orange', 'purple', 'gray', 'white', 'brown', 'cyan', 'magenta'];
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -60,16 +61,17 @@ export class DiagramEditor {
     this.wires = [];
     this.sel = null;
     for (const p of diagram.parts || []) {
-      if (!PARTS[p.type]) continue;
-      this.addPart(p.type, p.left || 0, p.top || 0, { id: p.id, rotate: p.rotate || 0, attrs: Object.assign(defaultAttrs(p.type), p.attrs || {}) }, true);
+      const type = String(p.type).replace(/^wokwi-/, 'esp32-iot-');   // part ids of projects saved before the rename
+      if (!PARTS[type]) continue;
+      this.addPart(type, p.left || 0, p.top || 0, { id: p.id, rotate: p.rotate || 0, attrs: Object.assign(defaultAttrs(type), p.attrs || {}) }, true);
     }
     for (const c of diagram.connections || []) {
       const [from, to, color, points] = c;
       if (!this.pinExists(from) || !this.pinExists(to)) continue;
       this.wires.push({ from, to, color: color || defaultWireColor(from, to), points: Array.isArray(points) ? points.filter((pt) => Array.isArray(pt)) : null });
     }
-    // connections without a route get an automatic elbow
-    for (const w of this.wires) if (!w.points) w.points = autoRoute(this.refPos(w.from), this.refPos(w.to));
+    // connections without a route are routed around the parts
+    routeWires(this.parts, this.wires);
     this.sync();
     this.select(null);
   }
@@ -92,7 +94,7 @@ export class DiagramEditor {
 
   newId(type) {
     const pre = ID_PREFIX[type] || 'part';
-    if (type === 'wokwi-esp32-devkit-v1' && !this.parts.some((p) => p.id === 'esp')) return 'esp';
+    if (PARTS[type].board && !this.parts.some((p) => p.id === 'esp')) return 'esp';
     let i = 1;
     while (this.parts.some((p) => p.id === pre + i)) i++;
     return pre + i;
@@ -101,6 +103,8 @@ export class DiagramEditor {
   addPart(type, x, y, opts = {}, silent) {
     const def = PARTS[type];
     if (def.unique && this.parts.some((p) => p.type === type)) { this.cb.toast && this.cb.toast('Chỉ được có một ' + def.label); return null; }
+    const other = def.board && this.parts.find((p) => PARTS[p.type].board);
+    if (other && !silent) { this.cb.toast && this.cb.toast(`Sơ đồ chỉ được có một board vi điều khiển — hãy xóa ${PARTS[other.type].label} trước`); return null; }
     const part = { type, id: opts.id || this.newId(type), x, y, rotate: opts.rotate || 0, attrs: opts.attrs || defaultAttrs(type), state: null };
     this.parts.push(part);
     this.renderPart(part);
@@ -245,11 +249,23 @@ export class DiagramEditor {
     this.changed();
   }
 
+  // wires of a moved/rotated part get a new route, except ones whose bends were edited by hand
+  reroute(part) {
+    let n = 0;
+    for (const w of this.wires) {
+      if (w.manual || (splitRef(w.from)[0] !== part.id && splitRef(w.to)[0] !== part.id)) continue;
+      w.points = null;
+      n++;
+    }
+    if (n) routeWires(this.parts, this.wires);
+  }
+
   rotateSelected() {
     const s = this.sel;
     if (!s || !s.el) return;
     s.rotate = ((s.rotate || 0) + 90) % 360;
     this.placePart(s);
+    this.reroute(s);
     this.sync();
     this.changed();
   }
@@ -338,8 +354,9 @@ export class DiagramEditor {
           if (ref !== this.wiring.from) {
             const exists = this.wires.some((w) => (w.from === this.wiring.from && w.to === ref) || (w.to === this.wiring.from && w.from === ref));
             if (!exists) {
-              const w = { from: this.wiring.from, to: ref, color: defaultWireColor(this.wiring.from, ref), points: this.wiring.points.length ? this.wiring.points : autoRoute(this.refPos(this.wiring.from), this.refPos(ref)) };
+              const w = { from: this.wiring.from, to: ref, color: defaultWireColor(this.wiring.from, ref), points: this.wiring.points.length ? this.wiring.points : null, manual: this.wiring.points.length > 0 };
               this.wires.push(w);
+              if (!w.points) routeWires(this.parts, this.wires);
               this.wiring = null;
               this.sync();
               this.select(w);
@@ -361,6 +378,7 @@ export class DiagramEditor {
       if (wpEl) {
         const w = this.wires[Number(wpEl.closest('.wire').dataset.idx)];
         drag = { kind: 'wp', w, k: Number(wpEl.dataset.k) };
+        w.manual = true;
         root.setPointerCapture(e.pointerId);
         return;
       }
@@ -373,6 +391,7 @@ export class DiagramEditor {
           let best = 0, bd = Infinity;
           for (let i = 0; i < pts.length - 1; i++) { const d = distSeg([wx, wy], pts[i], pts[i + 1]); if (d < bd) { bd = d; best = i; } }
           w.points.splice(best, 0, [Math.round(wx), Math.round(wy)]);
+          w.manual = true;
           this.drawWires();
           this.changed();
         }
@@ -429,6 +448,7 @@ export class DiagramEditor {
       }
     });
     root.addEventListener('pointerup', () => {
+      if (drag && drag.kind === 'part' && drag.moved) this.reroute(drag.part);
       if (drag && (drag.kind === 'part' || drag.kind === 'wp') && drag.moved) { this.sync(); this.changed(); }
       drag = null;
     });
@@ -438,6 +458,7 @@ export class DiagramEditor {
       if (wpEl) {
         const w = this.wires[Number(wpEl.closest('.wire').dataset.idx)];
         w.points.splice(Number(wpEl.dataset.k), 1);
+        w.manual = true;
         this.drawWires();
         this.changed();
       }
@@ -469,12 +490,6 @@ export function splitRef(ref) {
 
 function cssColor(c) {
   return { green: '#18a33a', red: '#e02424', black: '#222', blue: '#2b64e0', yellow: '#e8c400', orange: '#ff8a00', purple: '#8e3fe0', gray: '#888', white: '#f4f4f4', brown: '#8b4513', cyan: '#00b8d4', magenta: '#d81b9c', violet: '#8e3fe0', gold: '#d4af37' }[c] || c;
-}
-
-function autoRoute(a, b) {
-  if (!a || !b) return [];
-  if (Math.abs(a[0] - b[0]) < 3 || Math.abs(a[1] - b[1]) < 3) return [];
-  return [[Math.round(b[0]), Math.round(a[1])]];
 }
 
 function distSeg(p, a, b) {

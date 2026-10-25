@@ -1,10 +1,6 @@
 // Part definitions: geometry, pins, attributes, SVG visuals and electrical behaviour.
 import { glyph } from '../font5x7.js';
-
-export const ESP32_LEFT = ['EN', 'VP', 'VN', 'D34', 'D35', 'D32', 'D33', 'D25', 'D26', 'D27', 'D14', 'D12', 'D13', 'GND.1', 'VIN'];
-export const ESP32_RIGHT = ['D23', 'D22', 'TX0', 'RX0', 'D21', 'D19', 'D18', 'D5', 'TX2', 'RX2', 'D4', 'D2', 'D15', 'GND.2', '3V3'];
-export const ESP32_GPIO = { VP: 36, VN: 39, TX0: 1, RX0: 3, TX2: 17, RX2: 16 };
-for (const n of [...ESP32_LEFT, ...ESP32_RIGHT]) if (/^D\d+$/.test(n)) ESP32_GPIO[n] = Number(n.slice(1));
+import { BOARDS, ESP32_LEFT, ESP32_RIGHT } from '../boards.js';
 
 const LED_COLORS = { red: '#ff3030', green: '#30e050', blue: '#3d7dff', yellow: '#ffe030', white: '#f4f4ff', orange: '#ff8a1a', purple: '#b04dff' };
 
@@ -31,10 +27,76 @@ const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
 // Helper: pins on a straight row
 const rowPins = (names, x0, dx, y) => names.map((n, i) => ({ name: n, x: x0 + i * dx, y }));
 
+// ---------------------------------------------------------------- microcontroller boards (pin maps in boards.js)
+// Common behaviour: power pins, the on-board LED (drawn from the GPIO state, so it also works for LEDs that are not
+// on the header) and the BOOT button, which shorts its GPIO to GND while pressed (click the board while running).
+function boardBehaviour(type) {
+  const B = BOARDS[type];
+  const bootPin = B.boot && Object.keys(B.gpio).find((n) => B.gpio[n] === B.boot.gpio);
+  return {
+    label: B.label, category: 'Vi điều khiển', unique: true, board: true, interactive: !!bootPin,
+    drive(part, api) { return api.running ? Object.entries(B.power).map(([pin, v]) => ({ pin, v })) : []; },
+    links: bootPin ? (part) => (part.pressed ? [[bootPin, 'GND', 0]] : []) : undefined,
+    update(part, ctx) {
+      const pwr = part.el.querySelector('.pwr-led');
+      if (pwr) pwr.setAttribute('fill', ctx.running ? '#ff2020' : '#600');
+      const led = part.el.querySelector('.b-led');
+      if (!led || !B.led) return;
+      const g = ctx.gpio(B.led.gpio);
+      let lit = 0;
+      if (g && g.mode & 2) {
+        const level = g.pwm != null ? g.pwm : g.out ? 1 : 0;
+        lit = B.led.activeLow ? 1 - level : level;
+      }
+      led.setAttribute('fill', lit > 0.02 ? led.dataset.on : led.dataset.off);
+      led.setAttribute('opacity', lit > 0.02 ? (0.35 + 0.65 * lit).toFixed(2) : 1);
+    },
+  };
+}
+
+// Small boards with two castellated headers (XIAO, SuperMini): pins at x=8 / w-8, from y=26 every 12 px
+function smallBoard(type, { w, h, pcb, title, sub, shield, antenna, leds }) {
+  const B = BOARDS[type];
+  const xr = w - 8;
+  const pinY = (i) => 26 + i * 12;
+  return {
+    ...boardBehaviour(type),
+    size: () => ({ w, h }),
+    pins: () => [...B.left.map((n, i) => ({ name: n, x: 8, y: pinY(i) })), ...B.right.map((n, i) => ({ name: n, x: xr, y: pinY(i) }))],
+    render() {
+      const lbl = (n, x, y, anchor) => `<text x="${x}" y="${y + 2}" text-anchor="${anchor}" class="pl" font-size="5">${/^\d+$/.test(n) ? 'IO' + n : n}</text>`;
+      const cx = w / 2;
+      let s = `<rect x="0" y="8" width="${w}" height="${h - 8}" rx="6" fill="${pcb}"/>
+      <rect x="${cx - 16}" y="0" width="32" height="15" rx="3" fill="#c0c4cc" stroke="#888"/><rect x="${cx - 11}" y="4" width="22" height="6" rx="2" fill="#555"/>
+      <rect x="14" y="11" width="9" height="7" rx="1" fill="#ddd" stroke="#999"/><text x="25" y="16.5" font-size="3.5" fill="#bbb">B</text>
+      <rect x="${w - 23}" y="11" width="9" height="7" rx="1" fill="#ddd" stroke="#999"/><text x="${w - 25}" y="16.5" text-anchor="end" font-size="3.5" fill="#bbb">R</text>`;
+      if (shield) {
+        s += `<rect x="28" y="30" width="${w - 56}" height="46" rx="2" fill="#c9ced6" stroke="#8b9099"/>
+        <text x="${cx}" y="48" text-anchor="middle" font-size="6" fill="#444" font-family="monospace" font-weight="bold">XIAO</text>
+        <text x="${cx}" y="58" text-anchor="middle" font-size="4.6" fill="#555" font-family="monospace">${shield}</text>
+        <text x="${cx}" y="68" text-anchor="middle" font-size="3.6" fill="#666" font-family="sans-serif">Seeed Studio</text>`;
+      } else {
+        s += `<rect x="${cx - 13}" y="40" width="26" height="26" rx="1.5" fill="#2a2d33" stroke="#555"/>
+        <text x="${cx}" y="55" text-anchor="middle" font-size="4" fill="#bbb" font-family="monospace">C3</text>`;
+      }
+      s += `<text x="${cx}" y="${shield ? 88 : 80}" text-anchor="middle" font-size="6" fill="#e0e0e0" font-family="sans-serif" font-weight="bold">${title}</text>
+      <text x="${cx}" y="${shield ? 96 : 88}" text-anchor="middle" font-size="4" fill="#aaa" font-family="sans-serif">${sub}</text>`;
+      if (antenna) s += `<rect x="${cx - 22}" y="${h - 18}" width="44" height="10" rx="1" fill="#d8d2c4" stroke="#a49c8a"/><text x="${cx}" y="${h - 11.5}" text-anchor="middle" font-size="3.6" fill="#665">ANT</text>`;
+      for (const l of leds || []) {
+        s += `<rect x="${l.x}" y="${l.y}" width="6" height="4" rx="0.8" fill="${l.off}" ${l.pwr ? 'class="pwr-led"' : `class="b-led" data-on="${l.on}" data-off="${l.off}"`}/>
+        ${l.textRight ? `<text x="${l.x + 8}" y="${l.y + 3.5}" font-size="3.5" fill="#999">${l.text}</text>` : `<text x="${l.x + 3}" y="${l.y + 9}" text-anchor="middle" font-size="3.5" fill="#999">${l.text}</text>`}`;
+      }
+      B.left.forEach((n, i) => { s += `<circle cx="8" cy="${pinY(i)}" r="3.4" fill="#d4af37"/><circle cx="8" cy="${pinY(i)}" r="1.6" fill="#222"/>` + lbl(n, 14, pinY(i), 'start'); });
+      B.right.forEach((n, i) => { s += `<circle cx="${xr}" cy="${pinY(i)}" r="3.4" fill="#d4af37"/><circle cx="${xr}" cy="${pinY(i)}" r="1.6" fill="#222"/>` + lbl(n, xr - 6, pinY(i), 'end'); });
+      return s;
+    },
+  };
+}
+
 export const PARTS = {
   // ---------------------------------------------------------------- ESP32
-  'wokwi-esp32-devkit-v1': {
-    label: 'ESP32 DevKit V1', category: 'Vi điều khiển', unique: true,
+  'esp32-iot-esp32-devkit-v1': {
+    ...boardBehaviour('esp32-iot-esp32-devkit-v1'),
     size: () => ({ w: 124, h: 262 }),
     pins: () => [
       ...ESP32_LEFT.map((n, i) => ({ name: n, x: 8, y: 60 + i * 12 })),
@@ -56,25 +118,24 @@ export const PARTS = {
       <rect x="96" y="238" width="14" height="10" rx="2" fill="#444"/><circle cx="103" cy="243" r="3" fill="#111"/>
       <text x="21" y="256" text-anchor="middle" font-size="4.5" fill="#bbb">EN</text><text x="103" y="256" text-anchor="middle" font-size="4.5" fill="#bbb">BOOT</text>
       <rect x="36" y="232" width="6" height="4" fill="#600" class="pwr-led"/><text x="39" y="242" text-anchor="middle" font-size="4" fill="#999">PWR</text>
-      <rect x="82" y="232" width="6" height="4" fill="#123" class="d2-led"/><text x="85" y="242" text-anchor="middle" font-size="4" fill="#999">D2</text>`;
+      <rect x="82" y="232" width="6" height="4" fill="#123" class="b-led" data-on="#3da5ff" data-off="#123"/><text x="85" y="242" text-anchor="middle" font-size="4" fill="#999">D2</text>`;
       ESP32_LEFT.forEach((n, i) => { s += `<rect x="3" y="${55 + i * 12}" width="10" height="10" fill="#111" rx="1"/><circle cx="8" cy="${60 + i * 12}" r="2.6" fill="#d4af37"/>` + lbl(n, 16, 60 + i * 12, 'start'); });
       ESP32_RIGHT.forEach((n, i) => { s += `<rect x="111" y="${55 + i * 12}" width="10" height="10" fill="#111" rx="1"/><circle cx="116" cy="${60 + i * 12}" r="2.6" fill="#d4af37"/>` + lbl(n, 108, 60 + i * 12, 'end'); });
       return s;
     },
-    drive(part, api) {
-      if (!api.running) return [];
-      return [{ pin: 'GND.1', v: 0 }, { pin: 'GND.2', v: 0 }, { pin: '3V3', v: 3.3 }, { pin: 'VIN', v: 5 }];
-    },
-    update(part, ctx) {
-      const el = part.el;
-      el.querySelector('.pwr-led').setAttribute('fill', ctx.running ? '#ff2020' : '#600');
-      const v = ctx.V('D2');
-      el.querySelector('.d2-led').setAttribute('fill', ctx.running && v != null && v > 1.6 ? '#3da5ff' : '#123');
-    },
   },
+  'board-xiao-esp32-c3': smallBoard('board-xiao-esp32-c3', { w: 92, h: 110, pcb: '#1d1f24', title: 'XIAO', sub: 'ESP32-C3', shield: 'ESP32-C3' }),
+  'board-xiao-esp32-s3': smallBoard('board-xiao-esp32-s3', {
+    w: 92, h: 110, pcb: '#1d1f24', title: 'XIAO', sub: 'ESP32-S3', shield: 'ESP32-S3',
+    leds: [{ x: 40, y: 19, on: '#ffb020', off: '#5a4410', text: 'L', textRight: true }],
+  }),
+  'board-esp32-c3-supermini': smallBoard('board-esp32-c3-supermini', {
+    w: 92, h: 136, pcb: '#23262c', title: 'C3 SuperMini', sub: 'ESP32-C3', antenna: true,
+    leds: [{ x: 30, y: 28, pwr: true, off: '#600', text: 'PWR' }, { x: 56, y: 28, on: '#3d8bff', off: '#13233f', text: 'IO8' }],
+  }),
 
   // ---------------------------------------------------------------- passive / basic
-  'wokwi-led': {
+  'esp32-iot-led': {
     label: 'LED', category: 'Cơ bản',
     attrs: [{ key: 'color', label: 'Màu', type: 'select', options: Object.keys(LED_COLORS), default: 'red' }],
     size: () => ({ w: 30, h: 66 }),
@@ -97,7 +158,7 @@ export const PARTS = {
       part.el.querySelector('.body').setAttribute('opacity', (0.55 + b * 0.45).toFixed(2));
     },
   },
-  'wokwi-resistor': {
+  'esp32-iot-resistor': {
     label: 'Điện trở', category: 'Cơ bản',
     attrs: [{ key: 'value', label: 'Giá trị (Ω)', type: 'text', default: '220' }],
     size: () => ({ w: 64, h: 12 }),
@@ -111,7 +172,7 @@ export const PARTS = {
     },
     links: (part) => [['1', '2', parseOhms(part.attrs.value)]],
   },
-  'wokwi-pushbutton': {
+  'esp32-iot-pushbutton': {
     label: 'Nút nhấn', category: 'Cơ bản',
     attrs: [{ key: 'color', label: 'Màu', type: 'select', options: ['red', 'green', 'blue', 'yellow', 'white', 'black'], default: 'red' }],
     size: () => ({ w: 36, h: 48 }),
@@ -131,7 +192,7 @@ export const PARTS = {
       cap.setAttribute('stroke-width', part.pressed ? 3 : 1.5);
     },
   },
-  'wokwi-slide-switch': {
+  'esp32-iot-slide-switch': {
     label: 'Công tắc gạt', category: 'Cơ bản',
     attrs: [{ key: 'value', label: 'Vị trí', type: 'select', options: ['0', '1'], default: '0', live: true }],
     size: () => ({ w: 40, h: 44 }),
@@ -145,7 +206,7 @@ export const PARTS = {
     links: (part) => (String(part.attrs.value) === '1' ? [['2', '3', 0]] : [['1', '2', 0]]),
     update(part) { part.el.querySelector('.knob').setAttribute('x', String(part.attrs.value) === '1' ? 21 : 6); },
   },
-  'wokwi-potentiometer': {
+  'esp32-iot-potentiometer': {
     label: 'Biến trở', category: 'Cơ bản',
     attrs: [{ key: 'value', label: 'Giá trị (0–1023)', type: 'range', min: 0, max: 1023, step: 1, default: 512, live: true }],
     size: () => ({ w: 56, h: 70 }),
@@ -165,7 +226,7 @@ export const PARTS = {
       part.el.querySelector('.knob').setAttribute('transform', `rotate(${-135 + v * 270} 28 28)`);
     },
   },
-  'wokwi-rgb-led': {
+  'esp32-iot-rgb-led': {
     label: 'LED RGB', category: 'Cơ bản',
     attrs: [{ key: 'common', label: 'Chân chung', type: 'select', options: ['cathode', 'anode'], default: 'cathode' }],
     size: () => ({ w: 40, h: 66 }),
@@ -192,7 +253,7 @@ export const PARTS = {
       part.el.querySelector('.body').setAttribute('fill', m > 0.02 ? col : '#eef');
     },
   },
-  'wokwi-buzzer': {
+  'esp32-iot-buzzer': {
     label: 'Còi (buzzer)', category: 'Cơ bản',
     size: () => ({ w: 40, h: 52 }),
     pins: () => [{ name: '1', x: 15, y: 50 }, { name: '2', x: 25, y: 50 }],
@@ -210,7 +271,7 @@ export const PARTS = {
   },
 
   // ---------------------------------------------------------------- sensors
-  'wokwi-photoresistor-sensor': {
+  'esp32-iot-photoresistor-sensor': {
     label: 'Cảm biến ánh sáng (LDR)', category: 'Cảm biến', power: ['VCC', 'GND'],
     attrs: [{ key: 'lux', label: 'Độ sáng (lux)', type: 'range', min: 1, max: 2000, step: 1, default: 500, live: true },
       { key: 'threshold', label: 'Ngưỡng DO (lux)', type: 'number', default: 100 }],
@@ -234,7 +295,7 @@ export const PARTS = {
     },
     update(part, ctx) { part.el.querySelector('.doled').setAttribute('fill', ctx.powered() && Number(part.attrs.lux) >= Number(part.attrs.threshold || 100) ? '#2f2' : '#300'); },
   },
-  'wokwi-dht22': {
+  'esp32-iot-dht22': {
     label: 'DHT22 (nhiệt độ/độ ẩm)', category: 'Cảm biến', power: ['VCC', 'GND'],
     attrs: [{ key: 'temperature', label: 'Nhiệt độ (°C)', type: 'range', min: -40, max: 80, step: 0.1, default: 24, live: true },
       { key: 'humidity', label: 'Độ ẩm (%)', type: 'range', min: 0, max: 100, step: 0.5, default: 40, live: true }],
@@ -248,7 +309,7 @@ export const PARTS = {
       <text x="20" y="49" text-anchor="middle" font-size="6" fill="#666" font-weight="bold">DHT22</text>`;
     },
   },
-  'wokwi-dht11': {
+  'esp32-iot-dht11': {
     label: 'DHT11 (nhiệt độ/độ ẩm)', category: 'Cảm biến', power: ['VCC', 'GND'],
     attrs: [{ key: 'temperature', label: 'Nhiệt độ (°C)', type: 'range', min: 0, max: 50, step: 1, default: 25, live: true },
       { key: 'humidity', label: 'Độ ẩm (%)', type: 'range', min: 20, max: 90, step: 1, default: 50, live: true }],
@@ -262,7 +323,7 @@ export const PARTS = {
       <text x="20" y="49" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">DHT11</text>`;
     },
   },
-  'wokwi-hc-sr04': {
+  'esp32-iot-hc-sr04': {
     label: 'HC-SR04 (siêu âm)', category: 'Cảm biến', power: ['VCC', 'GND'],
     attrs: [{ key: 'distance', label: 'Khoảng cách (cm)', type: 'range', min: 2, max: 400, step: 1, default: 100, live: true }],
     size: () => ({ w: 112, h: 62 }),
@@ -275,7 +336,7 @@ export const PARTS = {
       ${['VCC', 'Trig', 'Echo', 'GND'].map((n, i) => `<text x="${41 + i * 10}" y="44" text-anchor="middle" font-size="4.2" fill="#fff">${n}</text>`).join('')}`;
     },
   },
-  'wokwi-pir-motion-sensor': {
+  'esp32-iot-pir-motion-sensor': {
     label: 'Cảm biến chuyển động PIR', category: 'Cảm biến', power: ['VCC', 'GND'],
     attrs: [{ key: 'motion', label: 'Chuyển động', type: 'button', text: 'Mô phỏng chuyển động (5 giây)', live: true }],
     size: () => ({ w: 64, h: 66 }),
@@ -299,7 +360,7 @@ export const PARTS = {
   },
 
   // ---------------------------------------------------------------- actuators / displays
-  'wokwi-servo': {
+  'esp32-iot-servo': {
     label: 'Động cơ Servo', category: 'Chấp hành',
     size: () => ({ w: 124, h: 52 }),
     pins: () => [{ name: 'GND', x: 2, y: 18 }, { name: 'V+', x: 2, y: 26 }, { name: 'PWM', x: 2, y: 34 }],
@@ -318,7 +379,7 @@ export const PARTS = {
       part.el.querySelector('.horn').setAttribute('transform', `rotate(${90 - ang} 80 26)`);
     },
   },
-  'wokwi-7segment': {
+  'esp32-iot-7segment': {
     label: 'LED 7 đoạn', category: 'Hiển thị',
     attrs: [{ key: 'common', label: 'Loại', type: 'select', options: ['cathode', 'anode'], default: 'cathode' },
       { key: 'color', label: 'Màu', type: 'select', options: ['red', 'green', 'blue', 'yellow', 'white'], default: 'red' }],
@@ -348,7 +409,7 @@ export const PARTS = {
       }
     },
   },
-  'wokwi-lcd1602': {
+  'esp32-iot-lcd1602': {
     label: 'LCD 16x2 / 20x4 (I2C)', category: 'Hiển thị', power: ['VCC', 'GND'], i2c: 'lcd',
     attrs: [{ key: 'size', label: 'Kích thước', type: 'select', options: ['16x2', '20x4'], default: '16x2' },
       { key: 'address', label: 'Địa chỉ I2C', type: 'select', options: ['0x27', '0x3F'], default: '0x27' },
@@ -417,7 +478,7 @@ export const PARTS = {
       }
     },
   },
-  'wokwi-ssd1306': {
+  'esp32-iot-ssd1306': {
     label: 'OLED SSD1306 128x64 (I2C)', category: 'Hiển thị', power: ['VCC', 'GND'], i2c: 'oled',
     attrs: [{ key: 'address', label: 'Địa chỉ I2C', type: 'select', options: ['0x3C', '0x3D'], default: '0x3C' }],
     size: () => ({ w: 140, h: 100 }),
@@ -441,7 +502,7 @@ export const PARTS = {
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (st.fb[y * st.w + x]) ctx2d.fillRect(x * S, y * S, S, S);
     },
   },
-  'wokwi-neopixel-strip': {
+  'esp32-iot-neopixel-strip': {
     label: 'NeoPixel (WS2812) dải LED', category: 'Hiển thị', power: ['VDD', 'VSS'],
     attrs: [{ key: 'pixels', label: 'Số LED', type: 'number', default: 8, min: 1, max: 32 }],
     size: (a) => ({ w: 18 + Math.max(1, Math.min(32, Number(a.pixels) || 8)) * 24, h: 38 }),

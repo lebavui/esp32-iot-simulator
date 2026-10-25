@@ -46,13 +46,15 @@ class Scope {
   }
 }
 
-export function generate(ast, libs) {
-  return new Gen(libs).program(ast);
+// consts: overrides of meta.js CONSTS for the selected board (null = not defined on that board)
+export function generate(ast, libs, consts) {
+  return new Gen(libs, consts).program(ast);
 }
 
 class Gen {
-  constructor(libs) {
+  constructor(libs, consts) {
     this.libs = libs || {};
+    this.consts = { ...CONSTS, ...consts };
     this.global = new Scope(null, null);
     this.funcs = new Map(); // name -> [{params, ret, js}]
     this.structs = new Map();
@@ -616,8 +618,8 @@ class Gen {
       const list = this.funcs.get(name);
       return [list[0].js, T.func];
     }
-    if (CONSTS[name]) {
-      const [val, ty] = CONSTS[name];
+    if (this.consts[name]) {
+      const [val, ty] = this.consts[name];
       const code = Number.isNaN(val) ? 'NaN' : val === Infinity ? 'Infinity' : String(val);
       return [code, this.typeFromMeta(ty)];
     }
@@ -744,7 +746,7 @@ class Gen {
       case 'Ident': {
         const v = scope.lookup(node.name);
         if (!v) {
-          if (this.funcs.has(node.name) || CONSTS[node.name] || OBJECTS[node.name]) throw this.err('lvalue required as left operand of assignment', node);
+          if (this.funcs.has(node.name) || this.consts[node.name] || OBJECTS[node.name]) throw this.err('lvalue required as left operand of assignment', node);
           throw this.err(`'${node.name}' was not declared in this scope`, node);
         }
         if (v.isConst) throw this.err(`assignment of read-only variable '${node.name}'`, node);

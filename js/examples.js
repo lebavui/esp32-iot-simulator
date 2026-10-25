@@ -1,14 +1,14 @@
-// Example projects: Arduino sketch + diagram (Wokwi-like diagram.json format).
+// Example projects: Arduino sketch + diagram (diagram.json format).
 // ESP32 is at (0,0). Right header pins x=116: D23 y60, D22 72, TX0 84, RX0 96, D21 108, D19 120, D18 132, D5 144,
 // TX2 156, RX2 168, D4 180, D2 192, D15 204, GND.2 216, 3V3 228. Left header x=8: VP 72 ... GND.1 216, VIN 228.
 
-const ESP = { type: 'wokwi-esp32-devkit-v1', id: 'esp', top: 0, left: 0, attrs: {} };
+const ESP = { type: 'esp32-iot-esp32-devkit-v1', id: 'esp', top: 0, left: 0, attrs: {} };
 const C = (from, to, color, points) => (points ? [from, to, color, points] : [from, to, color]);
 
 const LED_D4 = {
   parts: [
-    { type: 'wokwi-resistor', id: 'r1', top: 174, left: 140, attrs: { value: '220' } },
-    { type: 'wokwi-led', id: 'led1', top: 110, left: 230, attrs: { color: 'red' } },
+    { type: 'esp32-iot-resistor', id: 'r1', top: 174, left: 140, attrs: { value: '220' } },
+    { type: 'esp32-iot-led', id: 'led1', top: 110, left: 230, attrs: { color: 'red' } },
   ],
   conns: [
     C('esp:D4', 'r1:1', 'green', []),
@@ -18,8 +18,8 @@ const LED_D4 = {
 };
 
 const DHT_LCD_PARTS = [
-  { type: 'wokwi-lcd1602', id: 'lcd1', top: -60, left: 200, attrs: { size: '16x2', address: '0x27', color: 'green' } },
-  { type: 'wokwi-dht22', id: 'dht1', top: 120, left: 260, attrs: { temperature: 28.5, humidity: 65 } },
+  { type: 'esp32-iot-lcd1602', id: 'lcd1', top: -60, left: 200, attrs: { size: '16x2', address: '0x27', color: 'green' } },
+  { type: 'esp32-iot-dht22', id: 'dht1', top: 120, left: 260, attrs: { temperature: 28.5, humidity: 65 } },
 ];
 const LCD_CONNS = [
   C('esp:D21', 'lcd1:SDA', 'blue', [[170, 108], [170, -12]]),
@@ -32,7 +32,7 @@ const DHT_CONNS = [
   C('esp:3V3', 'dht1:VCC', 'red', [[268, 228]]),
   C('esp:GND.2', 'dht1:GND', 'black', [[292, 216]]),
 ];
-const OLED_PARTS = [{ type: 'wokwi-ssd1306', id: 'oled1', top: -40, left: 200, attrs: { address: '0x3C' } }];
+const OLED_PARTS = [{ type: 'esp32-iot-ssd1306', id: 'oled1', top: -40, left: 200, attrs: { address: '0x3C' } }];
 const OLED_CONNS = [
   C('esp:D21', 'oled1:SDA', 'blue', [[160, 108], [160, -55], [291, -55]]),
   C('esp:D22', 'oled1:SCL', 'yellow', [[150, 72], [150, -60], [277, -60]]),
@@ -40,7 +40,7 @@ const OLED_CONNS = [
   C('esp:GND.2', 'oled1:GND', 'black', [[185, 216], [185, -45], [249, -45]]),
 ];
 const POT_LEFT = {
-  parts: [{ type: 'wokwi-potentiometer', id: 'pot1', top: 150, left: -110, attrs: { value: 512 } }],
+  parts: [{ type: 'esp32-iot-potentiometer', id: 'pot1', top: 150, left: -110, attrs: { value: 512 } }],
   conns: [
     C('esp:D34', 'pot1:SIG', 'green', [[-30, 96], [-30, 245], [-82, 245]]),
     C('esp:3V3', 'pot1:VCC', 'red', [[130, 228], [130, 275], [-66, 275]]),
@@ -50,6 +50,10 @@ const POT_LEFT = {
 
 function diagram(parts, conns) {
   return { version: 1, author: 'ESP32 IoT Simulator', editor: 'esp32-iot-sim', parts: [ESP, ...parts], connections: conns };
+}
+// Other boards at (0,0): left header x=8, right header x=84, pins from y=26 every 12 (see boards.js for the order).
+function boardDiagram(type, parts, conns) {
+  return { ...diagram(parts, conns), parts: [{ type, id: 'esp', top: 0, left: 0, attrs: {} }, ...parts] };
 }
 
 export const EXAMPLES = [
@@ -108,7 +112,7 @@ void loop() {
   delay(10);
 }
 `,
-    diagram: diagram([...LED_D4.parts, { type: 'wokwi-pushbutton', id: 'btn1', top: 160, left: 290, attrs: { color: 'green' } }],
+    diagram: diagram([...LED_D4.parts, { type: 'esp32-iot-pushbutton', id: 'btn1', top: 160, left: 290, attrs: { color: 'green' } }],
       [...LED_D4.conns,
         C('esp:D15', 'btn1:1', 'blue', [[298, 204]]),
         C('esp:GND.2', 'btn1:2', 'black', [[132, 216], [132, 256], [318, 256]])]),
@@ -148,12 +152,12 @@ void loop() {
 }
 `,
     diagram: diagram([
-      { type: 'wokwi-led', id: 'led1', top: 60, left: -190, attrs: { color: 'red' } },
-      { type: 'wokwi-led', id: 'led2', top: 60, left: -150, attrs: { color: 'yellow' } },
-      { type: 'wokwi-led', id: 'led3', top: 60, left: -110, attrs: { color: 'green' } },
-      { type: 'wokwi-resistor', id: 'r1', top: 138, left: -80, attrs: { value: '220' } },
-      { type: 'wokwi-resistor', id: 'r2', top: 150, left: -80, attrs: { value: '220' } },
-      { type: 'wokwi-resistor', id: 'r3', top: 162, left: -80, attrs: { value: '220' } },
+      { type: 'esp32-iot-led', id: 'led1', top: 60, left: -190, attrs: { color: 'red' } },
+      { type: 'esp32-iot-led', id: 'led2', top: 60, left: -150, attrs: { color: 'yellow' } },
+      { type: 'esp32-iot-led', id: 'led3', top: 60, left: -110, attrs: { color: 'green' } },
+      { type: 'esp32-iot-resistor', id: 'r1', top: 138, left: -80, attrs: { value: '220' } },
+      { type: 'esp32-iot-resistor', id: 'r2', top: 150, left: -80, attrs: { value: '220' } },
+      { type: 'esp32-iot-resistor', id: 'r3', top: 162, left: -80, attrs: { value: '220' } },
     ], [
       C('esp:D25', 'r1:2', 'green', []), C('esp:D26', 'r2:2', 'green', []), C('esp:D27', 'r3:2', 'green', []),
       C('r1:1', 'led1:A', 'orange', [[-180, 144]]), C('r2:1', 'led2:A', 'orange', [[-140, 156]]), C('r3:1', 'led3:A', 'orange', [[-100, 168]]),
@@ -184,8 +188,8 @@ void loop() {
 `,
     diagram: diagram([
       ...POT_LEFT.parts,
-      { type: 'wokwi-resistor', id: 'r1', top: 126, left: 140, attrs: { value: '220' } },
-      { type: 'wokwi-led', id: 'led1', top: 60, left: 230, attrs: { color: 'blue' } },
+      { type: 'esp32-iot-resistor', id: 'r1', top: 126, left: 140, attrs: { value: '220' } },
+      { type: 'esp32-iot-led', id: 'led1', top: 60, left: 230, attrs: { color: 'blue' } },
     ], [
       ...POT_LEFT.conns,
       C('esp:D18', 'r1:1', 'green', []),
@@ -228,7 +232,7 @@ void loop() {
 }
 `,
     diagram: diagram([
-      { type: 'wokwi-7segment', id: 'sevseg1', top: -80, left: 250, attrs: { common: 'cathode', color: 'red' } },
+      { type: 'esp32-iot-7segment', id: 'sevseg1', top: -80, left: 250, attrs: { common: 'cathode', color: 'red' } },
     ], [
       C('esp:D23', 'sevseg1:A', 'green', [[335, 60], [335, -95], [290, -95]]),
       C('esp:D22', 'sevseg1:B', 'green', [[345, 72], [345, -100], [300, -100]]),
@@ -379,8 +383,8 @@ void loop() {
 }
 `,
     diagram: diagram([
-      { type: 'wokwi-hc-sr04', id: 'ultrasonic1', top: -40, left: 180, attrs: { distance: 120 } },
-      { type: 'wokwi-buzzer', id: 'bz1', top: 120, left: 300, attrs: {} },
+      { type: 'esp32-iot-hc-sr04', id: 'ultrasonic1', top: -40, left: 180, attrs: { distance: 120 } },
+      { type: 'esp32-iot-buzzer', id: 'bz1', top: 120, left: 300, attrs: {} },
     ], [
       C('esp:D18', 'ultrasonic1:TRIG', 'orange', [[231, 132]]),
       C('esp:D5', 'ultrasonic1:ECHO', 'purple', [[241, 144]]),
@@ -414,7 +418,7 @@ void loop() {
 `,
     diagram: diagram([
       ...POT_LEFT.parts,
-      { type: 'wokwi-servo', id: 'servo1', top: 60, left: 200, attrs: {} },
+      { type: 'esp32-iot-servo', id: 'servo1', top: 60, left: 200, attrs: {} },
     ], [
       ...POT_LEFT.conns,
       C('esp:D18', 'servo1:PWM', 'orange', [[170, 132], [170, 94]]),
@@ -452,7 +456,7 @@ void loop() {
 }
 `,
     diagram: diagram([
-      { type: 'wokwi-pir-motion-sensor', id: 'pir1', top: 100, left: 220, attrs: {} },
+      { type: 'esp32-iot-pir-motion-sensor', id: 'pir1', top: 100, left: 220, attrs: {} },
     ], [
       C('esp:D19', 'pir1:OUT', 'green', [[200, 120], [200, 185], [252, 185]]),
       C('esp:3V3', 'pir1:VCC', 'red', [[242, 228]]),
@@ -482,7 +486,7 @@ void loop() {
 }
 `,
     diagram: diagram([
-      { type: 'wokwi-photoresistor-sensor', id: 'ldr1', top: 60, left: -140, attrs: { lux: 500, threshold: 100 } },
+      { type: 'esp32-iot-photoresistor-sensor', id: 'ldr1', top: 60, left: -140, attrs: { lux: 500, threshold: 100 } },
     ], [
       C('esp:D34', 'ldr1:AO', 'green', [[-44, 96]]),
       C('esp:D35', 'ldr1:DO', 'purple', [[-10, 108], [-10, 83]]),
@@ -515,7 +519,7 @@ void loop() {
 }
 `,
     diagram: diagram([
-      { type: 'wokwi-neopixel-strip', id: 'strip1', top: -60, left: 200, attrs: { pixels: 8 } },
+      { type: 'esp32-iot-neopixel-strip', id: 'strip1', top: -60, left: 200, attrs: { pixels: 8 } },
     ], [
       C('esp:D23', 'strip1:DIN', 'green', [[150, 60], [150, -49]]),
       C('esp:3V3', 'strip1:VDD', 'red', [[180, 228], [180, -41]]),
@@ -529,7 +533,7 @@ void loop() {
 #include <ArduinoJson.h>
 #include <LiquidCrystal_I2C.h>
 
-const char* ssid = "Wokwi-GUEST";
+const char* ssid = "ESP32-IoT-GUEST";
 const char* password = "";
 // Open-Meteo: API miễn phí, không cần khóa (Hà Nội)
 const char* url = "https://api.open-meteo.com/v1/forecast?latitude=21.03&longitude=105.85&current_weather=true";
@@ -599,7 +603,7 @@ const char* serverUrl = "https://httpbin.org/post";   // server thử nghiệm, 
 void setup() {
   Serial.begin(115200);
   dht.begin();
-  WiFi.begin("Wokwi-GUEST", "");
+  WiFi.begin("ESP32-IoT-GUEST", "");
   Serial.print("Connecting");
   while (WiFi.status() != WL_CONNECTED) { delay(200); Serial.print("."); }
   Serial.println(" OK");
@@ -680,7 +684,7 @@ void setup() {
   Serial.begin(115200);
   pinMode(LED_PIN, OUTPUT);
   dht.begin();
-  WiFi.begin("Wokwi-GUEST", "");
+  WiFi.begin("ESP32-IoT-GUEST", "");
   while (WiFi.status() != WL_CONNECTED) { delay(250); Serial.print("."); }
   Serial.println("\\nWiFi connected");
   client.setServer(mqttServer, mqttPort);
@@ -709,7 +713,7 @@ void loop() {
       C('esp:GND.2', 'dht1:GND', 'black', [[342, 216]])]),
   },
   {
-    id: 'freertos', name: '16. FreeRTOS: 2 task song song', category: 'Nâng cao',
+    id: 'freertos', name: '17. FreeRTOS: 2 task song song', category: 'Nâng cao',
     code: `// Hai task FreeRTOS chạy song song, mỗi task nháy một LED với chu kỳ khác nhau
 const int LED1 = 4;
 
@@ -743,7 +747,7 @@ void loop() {
     diagram: diagram(LED_D4.parts, LED_D4.conns),
   },
   {
-    id: 'ntp-oled', name: '17. Đồng hồ NTP trên OLED', category: 'IoT',
+    id: 'ntp-oled', name: '16. Đồng hồ NTP trên OLED', category: 'IoT',
     code: `#include <WiFi.h>
 #include <time.h>
 #include <Adafruit_SSD1306.h>
@@ -759,7 +763,7 @@ void setup() {
   display.setCursor(0, 0);
   display.println("Connecting WiFi...");
   display.display();
-  WiFi.begin("Wokwi-GUEST", "");
+  WiFi.begin("ESP32-IoT-GUEST", "");
   while (WiFi.status() != WL_CONNECTED) delay(200);
   configTime(GMT_OFFSET, 0, "pool.ntp.org");
 }
@@ -786,5 +790,197 @@ void loop() {
 }
 `,
     diagram: diagram(OLED_PARTS, OLED_CONNS),
+  },
+  {
+    id: 'supermini-boot', name: '18. Nút BOOT & LED trên board', category: 'Cơ bản',
+    code: `// Nút BOOT trên board nối xuống GND — khi đang chạy, nhấn giữ chuột lên board để nhấn BOOT.
+// LED trên board (LED_BUILTIN) nháy 1 Hz; trên ESP32-C3 SuperMini / XIAO ESP32-S3 nó sáng khi xuất LOW.
+// Board không có nút BOOT / LED trên board thì được thay bằng nút nhấn / LED ngoài khi mở ví dụ.
+#define BOOT_PIN 9
+#define LED_PIN 3   // LED ngoài: LED_PIN -> điện trở -> LED -> GND
+
+bool last = false;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(BOOT_PIN, INPUT_PULLUP);
+  Serial.printf("%s sẵn sàng\\n", ESP.getChipModel());
+}
+
+void loop() {
+  bool pressed = digitalRead(BOOT_PIN) == LOW;
+  digitalWrite(LED_PIN, pressed ? HIGH : LOW);
+  digitalWrite(LED_BUILTIN, (millis() / 500) % 2 ? LOW : HIGH);
+  if (pressed != last) {
+    Serial.println(pressed ? "BOOT: nhấn" : "BOOT: nhả");
+    last = pressed;
+  }
+  delay(20);
+}
+`,
+    diagram: boardDiagram('board-esp32-c3-supermini', [
+      { type: 'esp32-iot-resistor', id: 'r1', top: 68, left: -90, attrs: { value: '220' } },
+      { type: 'esp32-iot-led', id: 'led1', top: 0, left: -150, attrs: { color: 'green' } },
+    ], [
+      C('esp:3', 'r1:2', 'green', []),
+      C('r1:1', 'led1:A', 'green', [[-140, 74]]),
+      C('led1:C', 'esp:GND', 'black', [[-130, 44], [-10, 44], [-10, 38]]),
+    ]),
+  },
+  {
+    id: 'xiao-c3-pot', name: '19. Biến trở điều khiển LED (tên chân A0/D10)', category: 'Cơ bản',
+    code: `// Biến trở ở chân analog POT_PIN điều khiển độ sáng LED ở LED_PIN (PWM).
+// Dùng tên chân in trên board (A0, D10…) theo pins_arduino.h; board không có tên đó thì được đổi sang số GPIO.
+#define POT_PIN A0
+#define LED_PIN D10
+
+void setup() {
+  Serial.begin(115200);
+  ledcAttach(LED_PIN, 5000, 12);   // PWM 5 kHz, 12 bit
+}
+
+void loop() {
+  int raw = analogRead(POT_PIN);   // 0..4095
+  ledcWrite(LED_PIN, raw);
+  Serial.printf("POT = %4d  (%d%%)\\n", raw, raw * 100 / 4095);
+  delay(300);
+}
+`,
+    diagram: boardDiagram('board-xiao-esp32-c3', [
+      { type: 'esp32-iot-potentiometer', id: 'pot1', top: -20, left: -110, attrs: { value: 512 } },
+      { type: 'esp32-iot-resistor', id: 'r1', top: 56, left: 110, attrs: { value: '220' } },
+      { type: 'esp32-iot-led', id: 'led1', top: -10, left: 190, attrs: { color: 'red' } },
+    ], [
+      C('esp:D0', 'pot1:SIG', 'green', [[-30, 26], [-30, 62], [-82, 62]]),
+      C('pot1:VCC', 'esp:3V3', 'red', [[-66, 125], [100, 125], [100, 50]]),
+      C('pot1:GND', 'esp:GND', 'black', [[-98, 132], [108, 132], [108, 38]]),
+      C('esp:D10', 'r1:1', 'orange', []),
+      C('r1:2', 'led1:A', 'orange', [[200, 62]]),
+      C('led1:C', 'esp:GND', 'black', [[210, 80], [96, 80], [96, 38]]),
+    ]),
+  },
+  {
+    id: 'xiao-s3-oled', name: '20. OLED: thông tin chip & LED trên board', category: 'Hiển thị',
+    code: `// OLED I2C trên chân SDA/SCL mặc định của board; hiển thị tên chip và số giây đã chạy.
+// LED trên board (LED_BUILTIN) nháy 1 Hz.
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_BUILTIN, OUTPUT);
+  Wire.begin();   // SDA, SCL theo pins_arduino.h của board
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("Không tìm thấy OLED");
+    while (true) delay(100);
+  }
+  Serial.printf("Chip %s, %d nhân, %d MHz\\n", ESP.getChipModel(), ESP.getChipCores(), ESP.getCpuFreqMHz());
+}
+
+void loop() {
+  unsigned long s = millis() / 1000;
+  digitalWrite(LED_BUILTIN, s % 2 ? LOW : HIGH);
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println(ESP.getChipModel());
+  display.setTextSize(2);
+  display.setCursor(0, 24);
+  display.print(s);
+  display.print(" s");
+  display.display();
+  delay(200);
+}
+`,
+    diagram: boardDiagram('board-xiao-esp32-s3', [{ type: 'esp32-iot-ssd1306', id: 'oled1', top: -70, left: 150, attrs: { address: '0x3C' } }], [
+      C('esp:D4', 'oled1:SDA', 'blue', [[-20, 74], [-20, -85], [241, -85]]),
+      C('esp:D5', 'oled1:SCL', 'yellow', [[-30, 86], [-30, -90], [227, -90]]),
+      C('esp:3V3', 'oled1:VCC', 'red', [[120, 50], [120, -80], [213, -80]]),
+      C('esp:GND', 'oled1:GND', 'black', [[110, 38], [110, -75], [199, -75]]),
+    ]),
+  },
+  {
+    id: 'lcd-i2c', name: '21. LCD 16x2 I2C: chữ chạy & ký tự tự tạo', category: 'Hiển thị',
+    code: `// LCD 16x2 qua module I2C (PCF8574, địa chỉ 0x27) nối vào chân SDA/SCL mặc định của board.
+// Dòng 1: thời gian chạy + ký tự tự tạo (trái tim nhấp nháy); dòng 2: chữ chạy.
+// LCD HD44780 không có dấu tiếng Việt nên chỉ in chữ không dấu.
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+#define LCD_ADDR 0x27
+
+LiquidCrystal_I2C lcd(LCD_ADDR, 16, 2);
+
+byte heart[8] = {0b00000, 0b01010, 0b11111, 0b11111, 0b11111, 0b01110, 0b00100, 0b00000};
+byte clock8[8] = {0b00000, 0b01110, 0b10101, 0b10111, 0b10001, 0b01110, 0b00000, 0b00000};
+
+String message = "Xin chao! Day la vi du LCD I2C tren ESP32 IoT Simulator";
+int pos = 0;
+
+// quét bus I2C, in các địa chỉ có thiết bị trả lời
+void scanI2C() {
+  Serial.println("Quét I2C...");
+  int found = 0;
+  for (byte addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("  Thiết bị ở 0x%02X\\n", addr);
+      found++;
+    }
+  }
+  if (!found) Serial.println("  Không có thiết bị — kiểm tra dây SDA/SCL, VCC, GND");
+}
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  scanI2C();
+
+  lcd.init();
+  lcd.backlight();
+  lcd.createChar(0, heart);
+  lcd.createChar(1, clock8);
+
+  lcd.setCursor(0, 0);
+  lcd.print("  LCD 16x2 I2C");
+  lcd.setCursor(0, 1);
+  lcd.print("  Dia chi 0x");
+  lcd.print(LCD_ADDR, HEX);
+  delay(1500);
+  lcd.clear();
+
+  message = "                " + message + " ";   // bắt đầu từ mép phải màn hình
+}
+
+void loop() {
+  unsigned long s = millis() / 1000;
+
+  // dòng 1: biểu tượng đồng hồ + mm:ss + trái tim nháy mỗi giây
+  char buf[17];
+  snprintf(buf, sizeof(buf), " %02lu:%02lu         ", s / 60, s % 60);
+  lcd.setCursor(0, 0);
+  lcd.write(1);
+  lcd.print(buf);
+  lcd.setCursor(15, 0);
+  if (s % 2) lcd.write(0); else lcd.print(" ");
+
+  // dòng 2: cửa sổ 16 ký tự trượt dần trên chuỗi
+  String window = message.substring(pos, pos + 16);
+  while (window.length() < 16) window += " ";
+  lcd.setCursor(0, 1);
+  lcd.print(window);
+  pos++;
+  if (pos >= (int)message.length()) pos = 0;
+
+  delay(300);
+}
+`,
+    diagram: diagram([DHT_LCD_PARTS[0]], LCD_CONNS),
   },
 ];

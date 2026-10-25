@@ -1,6 +1,6 @@
 # ESP32 IoT Simulator
 
-Ứng dụng web mô phỏng kit **ESP32 DevKit V1**, giao diện tương tự Wokwi: viết code Arduino (C/C++), lắp mạch với
+Ứng dụng web mô phỏng kit **ESP32 DevKit V1**: viết code Arduino (C/C++), lắp mạch với
 các linh kiện điện tử bằng kéo-thả/nối dây, và chạy mô phỏng ngay trong trình duyệt. Hỗ trợ **WiFi, HTTP và MQTT thật**
 (kết nối Internet), phục vụ giảng dạy IoT và hệ nhúng.
 
@@ -26,7 +26,13 @@ và chỉ hoạt động với API cho phép CORS.
 lambda, range-for, `switch`, biến `static`. Lỗi biên dịch được báo theo dòng/cột kiểu GCC
 (`'x' was not declared in this scope`, `expected ';' …`).
 
-**Linh kiện**: ESP32 DevKit V1 (30 chân, LED onboard GPIO2), LED, LED RGB, điện trở, nút nhấn, công tắc gạt,
+**Board**: ESP32 DevKit V1 (30 chân, LED onboard GPIO2), Seeed XIAO ESP32-C3, Seeed XIAO ESP32-S3 (LED onboard GPIO21),
+ESP32-C3 SuperMini (LED onboard GPIO8, nút BOOT GPIO9). Mỗi board có hằng số chân (`A0`, `D0`…, `SDA`/`SCL`, `LED_BUILTIN`)
+theo `pins_arduino.h` của arduino-esp32 3.3, macro `CONFIG_IDF_TARGET_ESP32C3`/`…S3`, và kiểm tra theo chip (chân flash,
+ADC1/ADC2, chân chỉ-vào của ESP32, ADC2 của ESP32-C3 không dùng được). Board chọn ở ô riêng trên thanh công cụ; đổi board
+(hoặc mở ví dụ khi đang chọn board khác) sẽ tự chuyển dây nối và số chân trong code sang board đó.
+
+**Linh kiện**: LED, LED RGB, điện trở, nút nhấn, công tắc gạt,
 biến trở, buzzer, DHT22/DHT11, HC-SR04, cảm biến ánh sáng LDR, PIR, servo, LED 7 đoạn, LCD 16x2/20x4 I2C,
 OLED SSD1306 128x64, dải NeoPixel.
 
@@ -46,17 +52,20 @@ SDA/SCL và cấp nguồn; ADC2 khi bật WiFi và chân chỉ-vào (34–39) đ
 - Tab **MQTT Client** có sẵn để subscribe/publish và điều khiển thiết bị ảo; tab **Nhật ký mạng** ghi mọi sự kiện WiFi/HTTP/MQTT.
 
 **Giao diện**: trình soạn thảo code (CodeMirror) + tab `diagram.json` sửa trực tiếp, canvas kéo-thả có zoom/pan,
-nối dây có điểm gấp và đổi màu, bảng thuộc tính (thanh trượt nhiệt độ, khoảng cách, độ sáng… thay đổi khi đang chạy),
-Serial Monitor hai chiều, 17 ví dụ mẫu, tự lưu vào trình duyệt, lưu/mở file `.json`/`.ino`, chia sẻ dự án qua link.
+nối dây có điểm gấp và đổi màu (dây tự đi vuông góc vòng qua linh kiện, đi lại khi di chuyển linh kiện), bảng thuộc tính (thanh trượt nhiệt độ, khoảng cách, độ sáng… thay đổi khi đang chạy),
+Serial Monitor hai chiều, 20 ví dụ mẫu, tự lưu vào trình duyệt, lưu/mở file `.json`/`.ino`, chia sẻ dự án qua link.
 
 ## Cấu trúc mã nguồn
 
 ```
 index.html, css/style.css
+js/boards.js             các board & chip: sơ đồ chân → GPIO, khả năng của chip, hằng số pins_arduino.h
+js/port.js               chuyển dự án sang board khác (gán lại chân, dây nối, số chân trong code)
 js/main.js               giao diện chính, điều khiển mô phỏng, Serial Monitor, lưu trữ
 js/compiler/             lexer.js (tiền xử lý), parser.js (AST), codegen.js (AST → JS), compile.js
 js/runtime/              runtime.js (Arduino core, lập lịch delay/task/ngắt), libs.js (thư viện), meta.js, format.js
-js/circuit/              parts.js (linh kiện: hình SVG, chân, hành vi điện), circuit.js (bộ giải mạch), editor.js (canvas)
+js/circuit/              parts.js (linh kiện: hình SVG, chân, hành vi điện), circuit.js (bộ giải mạch), editor.js (canvas),
+                         route.js (tự đi dây vuông góc, tránh linh kiện)
 js/examples.js           ví dụ mẫu (code + sơ đồ)
 js/mqttpanel.js, js/help.js, js/font5x7.js
 vendor/                  CodeMirror 5, mqtt.js (đã tải sẵn, chạy offline được trừ phần Internet)
