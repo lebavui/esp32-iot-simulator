@@ -1,14 +1,17 @@
 // ESP32 IoT Simulator – local server (no dependencies).
 // Serves the web app and provides an HTTP proxy (/__proxy) so simulated HTTPClient requests
-// are not blocked by browser CORS / mixed-content rules.
+// are not blocked by browser CORS / mixed-content rules, plus DNS (/__proxy/dns) and a UDP relay (/__proxy/udp:
+// one datagram out, the replies collected for a moment) for WiFi.hostByName / WiFiUDP / CoAP.
 // Usage: node server.js [port]      (default 8080, listens on 127.0.0.1 only)
 // Env: HOST (bind address), PORT, PROXY_BLOCK_PRIVATE=1 (proxy refuses loopback/private/link-local
-// targets — set this when the server is public, e.g. in Docker, so /__proxy cannot reach internal hosts).
+// targets — set this when the server is public, e.g. in Docker, so /__proxy cannot reach internal hosts),
+// UDP_PORTS (destination ports the UDP relay allows, default "5683" = CoAP).
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import net from 'net';
 import dns from 'dns/promises';
+import dgram from 'dgram';
 import { fileURLToPath } from 'url';
 
 const PORT = Number(process.argv[2] || process.env.PORT || 8080);
@@ -22,6 +25,8 @@ const MIME = {
 const MAX_BODY = 2 * 1024 * 1024;
 const BLOCK_PRIVATE = /^(1|true|yes|on)$/i.test(process.env.PROXY_BLOCK_PRIVATE || '');
 const MAX_REDIRECTS = 5;
+const UDP_PORTS = (process.env.UDP_PORTS || '5683').split(/[\s,]+/).filter(Boolean).map(Number);
+const HOSTNAME = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i;
 
 function isPrivateIp(ip) {
   if (net.isIPv6(ip)) {
@@ -95,10 +100,62 @@ async function handleProxy(req, res) {
   }
 }
 
+async function lookup4(host) {
+  if (net.isIPv4(host)) return host;
+  if (!HOSTNAME.test(host)) throw new Error('Tên miền không hợp lệ');
+  return (await dns.lookup(host, { family: 4 })).address;
+}
+
+async function handleDns(req, res) {
+  const send = (obj) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+  try {
+    const { host } = JSON.parse((await readBody(req)).toString('utf8'));
+    const address = await lookup4(String(host || ''));
+    if (BLOCK_PRIVATE && isPrivateIp(address)) return send({ error: 'Địa chỉ nội bộ bị chặn' });
+    send({ address });
+  } catch (e) { send({ error: (e && e.code) || e.message }); }
+}
+
+async function handleUdp(req, res) {
+  const send = (obj) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+  let sock;
+  try {
+    const { host, port, data, timeout = 3000 } = JSON.parse((await readBody(req)).toString('utf8'));
+    if (!UDP_PORTS.includes(Number(port))) return send({ error: `cổng UDP ${port} không được phép (UDP_PORTS=${UDP_PORTS.join(',')})` });
+    const buf = Buffer.from(String(data || ''), 'base64');
+    if (!buf.length || buf.length > 1472) return send({ error: 'kích thước gói UDP không hợp lệ' });
+    const address = await lookup4(String(host || ''));
+    if (BLOCK_PRIVATE && isPrivateIp(address)) return send({ error: 'Địa chỉ nội bộ bị chặn' });
+    sock = dgram.createSocket('udp4');
+    const replies = [];
+    await new Promise((resolve, reject) => {
+      let grace = null;
+      const done = setTimeout(resolve, Math.max(100, Math.min(5000, Number(timeout) || 3000)));
+      sock.on('message', (msg, rinfo) => {
+        if (rinfo.address !== address || rinfo.port !== Number(port) || replies.length >= 8) return;
+        replies.push({ data: msg.toString('base64'), address, port: rinfo.port });
+        // more datagrams may follow (e.g. an empty ACK, then the response)
+        clearTimeout(grace);
+        grace = setTimeout(() => { clearTimeout(done); resolve(); }, 250);
+      });
+      sock.on('error', reject);
+      sock.send(buf, Number(port), address, (err) => { if (err) reject(err); });
+    });
+    console.log(`[udp] ${address}:${port} ${buf.length} B -> ${replies.length} reply`);
+    send({ replies });
+  } catch (e) {
+    send({ error: (e && e.code) || e.message });
+  } finally {
+    if (sock) try { sock.close(); } catch { /* closed */ }
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, `http://${req.headers.host}`);
   if (u.pathname === '/__proxy/ping') { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('esp32sim-proxy'); return; }
   if (u.pathname === '/__proxy' && req.method === 'POST') { await handleProxy(req, res); return; }
+  if (u.pathname === '/__proxy/dns' && req.method === 'POST') { await handleDns(req, res); return; }
+  if (u.pathname === '/__proxy/udp' && req.method === 'POST') { await handleUdp(req, res); return; }
   let p = decodeURIComponent(u.pathname);
   if (p.endsWith('/')) p += 'index.html';
   const file = path.normalize(path.join(ROOT, p));

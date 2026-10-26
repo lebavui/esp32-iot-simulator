@@ -19,6 +19,8 @@ Các file liên quan:
 > Container đặt `PROXY_BLOCK_PRIVATE=1` nên proxy từ chối localhost, IP private (10.x, 172.16–31.x, 192.168.x),
 > link-local/metadata (169.254.x) và IPv6 nội bộ, kiểm tra lại ở mọi bước redirect. Hệ quả: sketch chạy trên bản
 > online **không gọi được** server HTTP trong LAN/localhost — muốn vậy thì chạy `npm start` trên máy mình.
+> Bộ chuyển tiếp UDP (`/__proxy/udp`, dùng cho CoAP) chỉ cho gửi tới các cổng trong `UDP_PORTS` (mặc định `5683`)
+> và cũng áp dụng chặn địa chỉ nội bộ như trên.
 
 ---
 

@@ -26,6 +26,42 @@ const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
 // Helper: pins on a straight row
 const rowPins = (names, x0, dx, y) => names.map((n, i) => ({ name: n, x: x0 + i * dx, y }));
+const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+
+// LM393 comparator sensor module, pins VCC GND DO AO on the right (like the LDR module). sense(part) gives
+// { ao: AO as a fraction of VCC, on: detected → DO pulled LOW and DO-LED lit }. The sensing element is drawn by
+// `element` on the left of the 90×38 board, or by `probe` in a pw×ph area left of the board (rain plate, soil fork);
+// `look(part)` updates its visuals from the attributes.
+function comparatorModule({ label, attrs, sense, element = '', pw = 0, ph = 38, probe, look }) {
+  const h = Math.max(38, ph);
+  const by = Math.round((h - 38) / 2);
+  const names = ['VCC', 'GND', 'DO', 'AO'];
+  return {
+    label, category: 'Cảm biến', power: ['VCC', 'GND'], analog: ['AO'], attrs,
+    size: () => ({ w: pw + 98, h }),
+    pins: () => names.map((name, i) => ({ name, x: pw + 96, y: by + 7 + i * 8 })),
+    render(part) {
+      return `${probe ? probe(part, h, by) : ''}<g transform="translate(${pw} ${by})">
+      <rect x="0" y="0" width="90" height="38" rx="3" fill="#1e3f8a"/>
+      ${names.map((n, i) => `<line x1="84" y1="${7 + i * 8}" x2="98" y2="${7 + i * 8}" stroke="#d4af37" stroke-width="2"/><text x="81" y="${9 + i * 8}" text-anchor="end" font-size="5" fill="#fff">${n}</text>`).join('')}
+      ${element}
+      <rect x="38" y="7" width="12" height="9" rx="1" fill="#222"/><text x="44" y="21" text-anchor="middle" font-size="3.5" fill="#cfd8ea">LM393</text>
+      <rect x="54" y="6" width="12" height="12" fill="#2d6bd6" stroke="#ccc"/><circle cx="60" cy="12" r="3" fill="#eee"/>
+      <rect x="42" y="27" width="5" height="3" fill="#e22"/><rect class="doled" x="54" y="27" width="5" height="3" fill="#300"/></g>`;
+    },
+    drive(part, api) {
+      if (!api.powered(part)) return [];
+      const vcc = api.V('VCC');
+      const s = sense(part);
+      return [{ pin: 'AO', v: vcc * clamp01(s.ao) }, { pin: 'DO', v: s.on ? api.V('GND') : vcc }];
+    },
+    update(part, ctx) {
+      part.el.querySelector('.doled').setAttribute('fill', ctx.powered() && sense(part).on ? '#2f2' : '#300');
+      if (look) look(part, ctx);
+    },
+  };
+}
 
 // ---------------------------------------------------------------- microcontroller boards (pin maps in boards.js)
 // Common behaviour: power pins, the on-board LED (drawn from the GPIO state, so it also works for LEDs that are not
@@ -207,7 +243,7 @@ export const PARTS = {
     update(part) { part.el.querySelector('.knob').setAttribute('x', String(part.attrs.value) === '1' ? 21 : 6); },
   },
   'esp32-iot-potentiometer': {
-    label: 'Biến trở', category: 'Cơ bản',
+    label: 'Biến trở', category: 'Cơ bản', analog: ['SIG'],
     attrs: [{ key: 'value', label: 'Giá trị (0–1023)', type: 'range', min: 0, max: 1023, step: 1, default: 512, live: true }],
     size: () => ({ w: 56, h: 70 }),
     pins: () => rowPins(['GND', 'SIG', 'VCC'], 12, 16, 68),
@@ -253,8 +289,9 @@ export const PARTS = {
       part.el.querySelector('.body').setAttribute('fill', m > 0.02 ? col : '#eef');
     },
   },
+  // kitPin: the signal pin goes to the board's buzzer GPIO (BOARDS[…].buzzer) when a project is moved to another board
   'esp32-iot-buzzer': {
-    label: 'Còi (buzzer)', category: 'Cơ bản',
+    label: 'Còi (buzzer)', category: 'Cơ bản', kitPin: '2',
     size: () => ({ w: 40, h: 52 }),
     pins: () => [{ name: '1', x: 15, y: 50 }, { name: '2', x: 25, y: 50 }],
     render() {
@@ -272,7 +309,7 @@ export const PARTS = {
 
   // ---------------------------------------------------------------- sensors
   'esp32-iot-photoresistor-sensor': {
-    label: 'Cảm biến ánh sáng (LDR)', category: 'Cảm biến', power: ['VCC', 'GND'],
+    label: 'Cảm biến ánh sáng (LDR)', category: 'Cảm biến', power: ['VCC', 'GND'], analog: ['AO'],
     attrs: [{ key: 'lux', label: 'Độ sáng (lux)', type: 'range', min: 1, max: 2000, step: 1, default: 500, live: true },
       { key: 'threshold', label: 'Ngưỡng DO (lux)', type: 'number', default: 100 }],
     size: () => ({ w: 98, h: 38 }),
@@ -358,6 +395,100 @@ export const PARTS = {
       part.el.querySelector('.dome').setAttribute('fill', on ? '#ffe0b0' : '#f4f4f4');
     },
   },
+  // IR flame sensor: more flame → lower AO; DO LOW when the flame exceeds the trimmer threshold
+  'esp32-iot-flame-sensor': comparatorModule({
+    label: 'Cảm biến lửa (IR)',
+    attrs: [{ key: 'flame', label: 'Cường độ lửa (%)', type: 'range', min: 0, max: 100, step: 1, default: 0, live: true },
+      { key: 'threshold', label: 'Ngưỡng DO (%)', type: 'number', default: 40 }],
+    sense: (p) => ({ ao: 0.98 - 0.9 * num(p.attrs.flame) / 100, on: num(p.attrs.flame) >= num(p.attrs.threshold, 40) }),
+    pw: 24,
+    probe: () => `<path class="fire" d="M12 30C3 27 3 18 9 10c0 6 4 6 4 2 5 4 8 9 6 14-1 3-3 4-7 4z" fill="#ff7a1a" stroke="#ffd23f" stroke-width="1.2" opacity="0"/>`,
+    element: `<line x1="0" y1="17" x2="8" y2="17" stroke="#ccc" stroke-width="1.4"/><line x1="0" y1="21" x2="8" y2="21" stroke="#ccc" stroke-width="1.4"/>
+      <rect x="8" y="12" width="10" height="14" fill="#111"/><path d="M18 12h6a7 7 0 0 1 0 14h-6z" fill="#151515" stroke="#333"/>`,
+    look(part) { part.el.querySelector('.fire').setAttribute('opacity', (num(part.attrs.flame) / 100).toFixed(2)); },
+  }),
+  // MQ-2 gas/smoke sensor: sensing resistance Rs follows the datasheet's LPG curve, log(Rs/R0) = -0.455·log(ppm) + 1.251
+  // (Rs/R0 = 9.83 in clean air), R0 = 10 kΩ, load resistor RL = 5 kΩ on the module: AO = VCC·RL/(RL+Rs) rises with the
+  // concentration; DO LOW above the threshold
+  'esp32-iot-mq2': comparatorModule({
+    label: 'Cảm biến khí gas MQ-2',
+    attrs: [{ key: 'gas', label: 'Nồng độ khí (ppm)', type: 'range', min: 0, max: 10000, step: 10, default: 300, live: true },
+      { key: 'threshold', label: 'Ngưỡng DO (ppm)', type: 'number', default: 2000 }],
+    sense: (p) => {
+      const g = Math.max(0, num(p.attrs.gas));
+      const ratio = g > 0 ? Math.min(9.83, 10 ** (-0.455 * Math.log10(g) + 1.251)) : 9.83;
+      return { ao: 5 / (5 + 10 * ratio), on: g >= num(p.attrs.threshold, 2000) };
+    },
+    element: `<circle cx="18" cy="19" r="16" fill="#b8bcc4" stroke="#7c828c"/><circle class="mesh" cx="18" cy="19" r="11.5" fill="#8d939b"/>
+      <path d="M8 14h20M7 19h22M8 24h20M13 9v20M18 8v22M23 9v20" stroke="#6b7079" stroke-width="0.7"/>`,
+    look(part) {
+      const k = clamp01(num(part.attrs.gas) / 10000);
+      part.el.querySelector('.mesh').setAttribute('fill', `rgb(${Math.round(141 - k * 60)},${Math.round(147 - k * 80)},${Math.round(155 - k * 110)})`);
+    },
+  }),
+  // rain sensor: plate + comparator board; wetter plate → lower AO; DO LOW when wet
+  'esp32-iot-rain-sensor': comparatorModule({
+    label: 'Cảm biến mưa',
+    attrs: [{ key: 'rain', label: 'Mức mưa (%)', type: 'range', min: 0, max: 100, step: 1, default: 0, live: true },
+      { key: 'threshold', label: 'Ngưỡng DO (%)', type: 'number', default: 30 }],
+    sense: (p) => ({ ao: 0.98 - 0.85 * num(p.attrs.rain) / 100, on: num(p.attrs.rain) >= num(p.attrs.threshold, 30) }),
+    pw: 76, ph: 56,
+    probe: (part, h, by) => {
+      let comb = '';
+      for (let i = 0; i < 6; i++) comb += `<path d="M${i % 2 ? 60 : 6} ${10 + i * 7}H${i % 2 ? 12 : 54}" stroke="#d8dde3" stroke-width="2.2"/>`;
+      let drops = '';
+      for (const [x, y] of [[14, 14], [40, 9], [28, 30], [50, 40], [18, 44], [56, 22]]) drops += `<ellipse class="drop" cx="${x}" cy="${y}" rx="3" ry="4" fill="#5fb4ff" opacity="0"/>`;
+      return `<rect x="0" y="0" width="66" height="${h}" rx="3" fill="#1f3b70"/>
+        <path d="M5 4V52M61 4V52" stroke="#d8dde3" stroke-width="2.2"/>${comb}${drops}
+        <path d="M66 ${by + 16}H76M66 ${by + 22}H76" stroke="#555" stroke-width="1.6"/>`;
+    },
+    look(part) {
+      const r = num(part.attrs.rain) / 100;
+      part.el.querySelectorAll('.drop').forEach((d, i) => d.setAttribute('opacity', r > i / 6 ? 0.9 : 0));
+    },
+  }),
+  // soil moisture probe (resistive fork): moister soil → lower AO; DO LOW when moist (HIGH = dry, needs water)
+  'esp32-iot-soil-moisture-sensor': comparatorModule({
+    label: 'Cảm biến độ ẩm đất',
+    attrs: [{ key: 'moisture', label: 'Độ ẩm đất (%)', type: 'range', min: 0, max: 100, step: 1, default: 35, live: true },
+      { key: 'threshold', label: 'Ngưỡng DO (%)', type: 'number', default: 40 }],
+    sense: (p) => ({ ao: 0.95 - 0.7 * num(p.attrs.moisture) / 100, on: num(p.attrs.moisture) >= num(p.attrs.threshold, 40) }),
+    pw: 46, ph: 84,
+    probe: (part, h, by) => `<rect class="soil" x="0" y="34" width="38" height="${h - 34}" rx="3" fill="#8a6a45"/>
+      <rect x="4" y="2" width="30" height="18" rx="2" fill="#1f3b70"/>
+      <path d="M7 20V74l3.5 8 3.5-8V20zM24 20V74l3.5 8 3.5-8V20z" fill="#c9cfd6" stroke="#8a929c" stroke-width="0.8"/>
+      <path d="M34 ${by + 16}H46M34 ${by + 22}H46" stroke="#555" stroke-width="1.6"/>`,
+    look(part) {
+      const m = clamp01(num(part.attrs.moisture) / 100);
+      part.el.querySelector('.soil').setAttribute('fill', `rgb(${Math.round(160 - m * 95)},${Math.round(125 - m * 75)},${Math.round(85 - m * 50)})`);
+    },
+  }),
+  // water level sensor (exposed traces): output S rises with the immersed length
+  'esp32-iot-water-level-sensor': {
+    label: 'Cảm biến mực nước', category: 'Cảm biến', power: ['VCC', 'GND'], analog: ['S'],
+    attrs: [{ key: 'level', label: 'Mực nước (%)', type: 'range', min: 0, max: 100, step: 1, default: 30, live: true }],
+    size: () => ({ w: 40, h: 100 }),
+    pins: () => rowPins(['S', 'VCC', 'GND'], 12, 8, 2),
+    render() {
+      let traces = '';
+      for (let i = 0; i < 10; i++) traces += `<rect x="${7 + i * 2.6}" y="${i % 2 ? 36 : 40}" width="1.4" height="${i % 2 ? 54 : 54}" fill="#d9c27a"/>`;
+      return `${[12, 20, 28].map((x) => `<line x1="${x}" y1="0" x2="${x}" y2="12" stroke="#d4af37" stroke-width="1.8"/>`).join('')}
+      <rect x="4" y="10" width="32" height="88" rx="3" fill="#c62b2b"/>
+      ${['S', '+', '−'].map((n, i) => `<text x="${12 + i * 8}" y="19" text-anchor="middle" font-size="5" fill="#fff">${n}</text>`).join('')}
+      <circle cx="20" cy="27" r="2" fill="#e22"/>${traces}
+      <rect class="water" x="0" y="98" width="40" height="0" fill="#3d8bff" opacity="0.45"/>`;
+    },
+    drive(part, api) {
+      if (!api.powered(part)) return [];
+      return [{ pin: 'S', v: api.V('VCC') * 0.85 * clamp01(num(part.attrs.level) / 100) }];
+    },
+    update(part) {
+      const hgt = 60 * clamp01(num(part.attrs.level) / 100);
+      const w = part.el.querySelector('.water');
+      w.setAttribute('y', (98 - hgt).toFixed(1));
+      w.setAttribute('height', hgt.toFixed(1));
+    },
+  },
 
   // ---------------------------------------------------------------- actuators / displays
   'esp32-iot-servo': {
@@ -377,6 +508,63 @@ export const PARTS = {
       if (a != null && ctx.powered(['V+', 'GND'])) part.angle = a;
       const ang = part.angle == null ? 90 : part.angle;
       part.el.querySelector('.horn').setAttribute('transform', `rotate(${90 - ang} 80 26)`);
+    },
+  },
+  // 1-channel relay module: coil driven from IN (active HIGH or LOW), contacts COM–NO closed while energized,
+  // COM–NC otherwise. The contact state depends on solved voltages, so the solver settles it (see circuit.js).
+  'esp32-iot-relay-module': {
+    label: 'Module relay 1 kênh', category: 'Chấp hành', power: ['VCC', 'GND'],
+    attrs: [{ key: 'trigger', label: 'Mức kích', type: 'select', options: ['high', 'low'], default: 'high' }],
+    size: () => ({ w: 112, h: 56 }),
+    pins: () => [{ name: 'VCC', x: 2, y: 16 }, { name: 'GND', x: 2, y: 28 }, { name: 'IN', x: 2, y: 40 },
+      { name: 'NO', x: 110, y: 13 }, { name: 'COM', x: 110, y: 28 }, { name: 'NC', x: 110, y: 43 }],
+    render(part) {
+      return `${[16, 28, 40].map((y) => `<line x1="0" y1="${y}" x2="12" y2="${y}" stroke="#d4af37" stroke-width="2"/>`).join('')}
+      ${[13, 28, 43].map((y) => `<line x1="98" y1="${y}" x2="112" y2="${y}" stroke="#bbb" stroke-width="2"/>`).join('')}
+      <rect x="8" y="2" width="94" height="52" rx="3" fill="#1d5fb0"/>
+      ${['VCC', 'GND', 'IN'].map((n, i) => `<text x="14" y="${18 + i * 12}" font-size="5" fill="#fff">${n}</text>`).join('')}
+      <rect x="28" y="7" width="40" height="42" rx="2" fill="#2148c9" stroke="#15308a"/>
+      <text x="48" y="14" text-anchor="middle" font-size="4" fill="#dfe6ff">SRD-05VDC</text>
+      <text x="48" y="47" text-anchor="middle" font-size="4" fill="#dfe6ff">${part.attrs.trigger === 'low' ? 'LOW' : 'HIGH'} trigger</text>
+      <circle cx="36" cy="28" r="1.8" fill="#fff"/><circle cx="60" cy="19" r="1.8" fill="#fff"/><circle cx="60" cy="37" r="1.8" fill="#fff"/>
+      <line class="arm" x1="36" y1="28" x2="59" y2="37" stroke="#fff" stroke-width="1.6"/>
+      <rect x="76" y="5" width="22" height="46" rx="2" fill="#2e8bd8" stroke="#1a5f99"/>
+      ${[13, 28, 43].map((y) => `<circle cx="87" cy="${y}" r="5" fill="#ccd" stroke="#889"/><path d="M84 ${y}h6" stroke="#556" stroke-width="1.2"/>`).join('')}
+      ${['NO', 'COM', 'NC'].map((n, i) => `<text x="74" y="${15 + i * 15}" text-anchor="end" font-size="4.5" fill="#fff">${n}</text>`).join('')}
+      <rect x="15" y="44" width="5" height="3" fill="#e22"/><rect class="act" x="15" y="6" width="5" height="3" fill="#030"/>`;
+    },
+    links: (part) => (part.energized ? [['COM', 'NO', 0]] : [['COM', 'NC', 0]]),
+    settle(part, api) {
+      const vin = api.V('IN'), gnd = api.V('GND');
+      let on = false;
+      if (api.powered() && vin != null) on = part.attrs.trigger === 'low' ? vin - gnd < 1.0 : vin - gnd >= 1.5;
+      if (on === !!part.energized) return false;
+      part.energized = on;
+      return true;
+    },
+    update(part) {
+      part.el.querySelector('.arm').setAttribute('y2', part.energized ? 19 : 37);
+      part.el.querySelector('.act').setAttribute('fill', part.energized ? '#2f2' : '#030');
+    },
+  },
+  'esp32-iot-lamp': {
+    label: 'Bóng đèn', category: 'Chấp hành',
+    attrs: [{ key: 'volt', label: 'Điện áp định mức (V)', type: 'number', default: 5 }],
+    size: () => ({ w: 40, h: 62 }),
+    pins: () => [{ name: '1', x: 14, y: 60 }, { name: '2', x: 26, y: 60 }],
+    render() {
+      return `<circle class="glow" cx="20" cy="18" r="17" fill="#ffd54a" opacity="0" filter="url(#glow)"/>
+      <line x1="14" y1="44" x2="14" y2="62" stroke="#9aa" stroke-width="1.8"/><line x1="26" y1="44" x2="26" y2="62" stroke="#9aa" stroke-width="1.8"/>
+      <circle class="bulb" cx="20" cy="18" r="15" fill="#f2f2e8" opacity="0.75" stroke="#bbb"/>
+      <path d="M15 32v-8l3-6 2 4 2-4 3 6v8" stroke="#8a7a5a" stroke-width="1" fill="none"/>
+      <rect x="12" y="32" width="16" height="12" rx="2" fill="#a8adb4" stroke="#7a8088"/><path d="M12 36h16M12 40h16" stroke="#7a8088"/>`;
+    },
+    links: () => [['1', '2', 30]],
+    update(part, ctx) {
+      const a = ctx.V('1'), b = ctx.V('2');
+      const k = a == null || b == null ? 0 : clamp01(Math.abs(a - b) / Math.max(0.5, num(part.attrs.volt, 5)));
+      part.el.querySelector('.glow').setAttribute('opacity', (k * 0.95).toFixed(2));
+      part.el.querySelector('.bulb').setAttribute('fill', k > 0.05 ? `rgb(255,${Math.round(225 + 25 * k)},${Math.round(150 - 60 * k)})` : '#f2f2e8');
     },
   },
   'esp32-iot-7segment': {
@@ -527,6 +715,38 @@ export const PARTS = {
         el.setAttribute('fill', m > 2 ? `rgb(${c.map((x) => Math.min(255, Math.round(x * (255 / Math.max(m, 1)) * Math.min(1, 0.4 + m / 160)))).join(',')})` : '#ddd');
         el.setAttribute('filter', m > 2 ? 'url(#glow2)' : '');
       }
+    },
+  },
+
+  // ---------------------------------------------------------------- communication
+  // SX1278 LoRa module on SPI (LoRa.h). Packets go over the simulator's virtual radio (other open tabs);
+  // the button queues a test packet as if received from another node (part.inbox, read by LoRaClass).
+  'esp32-iot-lora-ra02': {
+    label: 'LoRa SX1278 (Ra-02)', category: 'Truyền thông', power: ['VCC', 'GND'], spi: true,
+    attrs: [{ key: 'msg', label: 'Gói tin thử', type: 'text', default: 'Xin chao tu node LoRa!' },
+      { key: 'rssi', label: 'RSSI gói thử (dBm)', type: 'range', min: -120, max: -30, step: 1, default: -70 },
+      { key: 'inject', label: 'Khi đang chạy', type: 'button', text: 'Nhận gói tin thử' }],
+    size: () => ({ w: 86, h: 92 }),
+    pins: () => ['VCC', 'GND', 'NSS', 'SCK', 'MOSI', 'MISO', 'RST', 'DIO0'].map((name, i) => ({ name, x: 2, y: 11 + i * 10 })),
+    render() {
+      const names = ['VCC', 'GND', 'NSS', 'SCK', 'MOSI', 'MISO', 'RST', 'DIO0'];
+      return `${names.map((n, i) => `<line x1="0" y1="${11 + i * 10}" x2="12" y2="${11 + i * 10}" stroke="#d4af37" stroke-width="2"/><text x="14" y="${13 + i * 10}" font-size="4.6" fill="#fff">${n}</text>`).join('')}
+      <rect x="8" y="2" width="76" height="88" rx="3" fill="#20262e"/>
+      <path d="M70 18V12l-4-2 8-2-8-2 8-2-8-2" stroke="#d4af37" stroke-width="1.3" fill="none"/>
+      <rect x="34" y="16" width="44" height="58" rx="2" fill="#c8ccd2" stroke="#8d939b"/>
+      <text x="56" y="34" text-anchor="middle" font-size="7" font-weight="bold" fill="#3a3f48">Ra-02</text>
+      <text x="56" y="45" text-anchor="middle" font-size="5" fill="#3a3f48">SX1278</text>
+      <text x="56" y="54" text-anchor="middle" font-size="5" fill="#3a3f48">433MHz LoRa</text>
+      <rect class="tx" x="40" y="80" width="6" height="4" fill="#300"/><text x="48" y="84" font-size="4" fill="#ccc">TX</text>
+      <rect class="rx" x="60" y="80" width="6" height="4" fill="#030"/><text x="68" y="84" font-size="4" fill="#ccc">RX</text>`;
+    },
+    onButton(part) {
+      (part.inbox = part.inbox || []).push({ text: String(part.attrs.msg ?? ''), rssi: num(part.attrs.rssi, -70) });
+    },
+    update(part) {
+      const t = Date.now();
+      part.el.querySelector('.tx').setAttribute('fill', part.txUntil > t ? '#f33' : '#300');
+      part.el.querySelector('.rx').setAttribute('fill', part.rxUntil > t ? '#3f3' : '#030');
     },
   },
 };

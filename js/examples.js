@@ -56,6 +56,72 @@ function boardDiagram(type, parts, conns) {
   return { ...diagram(parts, conns), parts: [{ type, id: 'esp', top: 0, left: 0, attrs: {} }, ...parts] };
 }
 
+// Parts reused by the sensor / actuator / radio examples (wires without bends are routed when the example is opened)
+// buzzer on the kit's buzzer pin (BOARDS[…].buzzer: GPIO4 on the DevKit, D3 of the XIAO expansion board)
+const buzzerAt = (gp = 'D4', left = 300, top = 140) => ({
+  parts: [{ type: 'esp32-iot-buzzer', id: 'bz1', top, left, attrs: {} }],
+  conns: [C(`esp:${gp}`, 'bz1:2', 'orange'), C('bz1:1', 'esp:GND.2', 'black')],
+});
+// LED + 220 Ω on GPIO5 (for examples whose GPIO4 is taken by the buzzer)
+const LED_D5 = {
+  parts: [
+    { type: 'esp32-iot-resistor', id: 'r1', top: 138, left: 140, attrs: { value: '220' } },
+    { type: 'esp32-iot-led', id: 'led1', top: 50, left: 230, attrs: { color: 'red' } },
+  ],
+  conns: [C('esp:D5', 'r1:1', 'green'), C('r1:2', 'led1:A', 'green'), C('led1:C', 'esp:GND.2', 'black')],
+};
+const BUTTON_D15 = {
+  parts: [{ type: 'esp32-iot-pushbutton', id: 'btn1', top: 220, left: 160, attrs: { color: 'green' } }],
+  conns: [C('esp:D15', 'btn1:1', 'blue'), C('btn1:2', 'esp:GND.2', 'black')],
+};
+// comparator sensor module (VCC GND DO AO) left of the board
+const sensorLeft = (type, id, attrs, w, pins, top = 80) => ({
+  parts: [{ type, id, top, left: -60 - w, attrs }],
+  conns: [C('esp:3V3', `${id}:VCC`, 'red'), C('esp:GND.1', `${id}:GND`, 'black'), ...pins.map(([gp, pin, color]) => C(`esp:${gp}`, `${id}:${pin}`, color))],
+});
+// MQ-2 wired as the real module needs: VCC from VIN (its heater needs 5 V) and the 0–5 V output (AO or DO) brought
+// to ≤ 3.3 V by a 10 kΩ / 20 kΩ divider before the GPIO
+const mq2At5V = (out, gp) => ({
+  parts: [
+    { type: 'esp32-iot-mq2', id: 'mq1', top: 70, left: -280, attrs: { gas: 300, threshold: 2000 } },
+    { type: 'esp32-iot-resistor', id: 'rdiv1', top: 120, left: -150, attrs: { value: '10k' } },
+    { type: 'esp32-iot-resistor', id: 'rdiv2', top: 170, left: -120, attrs: { value: '20k' } },
+  ],
+  conns: [
+    C('esp:VIN', 'mq1:VCC', 'red'), C('esp:GND.1', 'mq1:GND', 'black'), C(`mq1:${out}`, 'rdiv1:1', 'green'),
+    C('rdiv1:2', `esp:${gp}`, 'green'), C('rdiv2:1', `esp:${gp}`, 'green'), C('rdiv2:2', 'esp:GND.1', 'black'),
+  ],
+});
+// relay module switching a 5 V lamp: VIN → COM, NO → lamp → GND
+const relayLamp = (inPin, top = 120) => ({
+  parts: [
+    { type: 'esp32-iot-relay-module', id: 'relay1', top, left: 200, attrs: { trigger: 'high' } },
+    { type: 'esp32-iot-lamp', id: 'lamp1', top: top - 70, left: 360, attrs: { volt: 5 } },
+  ],
+  conns: [
+    C('esp:VIN', 'relay1:VCC', 'red'), C('esp:GND.2', 'relay1:GND', 'black'), C(`esp:${inPin}`, 'relay1:IN', 'green'),
+    C('esp:VIN', 'relay1:COM', 'red'), C('relay1:NO', 'lamp1:1', 'orange'), C('lamp1:2', 'esp:GND.2', 'black'),
+  ],
+});
+// SX1278 module on the hardware SPI pins (SCK 18, MISO 19, MOSI 23), NSS = 5, RST = 4, DIO0 = 2
+const loraRight = (top = 20) => ({
+  parts: [{ type: 'esp32-iot-lora-ra02', id: 'lora1', top, left: 200, attrs: {} }],
+  conns: [
+    C('esp:3V3', 'lora1:VCC', 'red'), C('esp:GND.2', 'lora1:GND', 'black'), C('esp:D5', 'lora1:NSS', 'purple'),
+    C('esp:D18', 'lora1:SCK', 'yellow'), C('esp:D23', 'lora1:MOSI', 'blue'), C('esp:D19', 'lora1:MISO', 'green'),
+    C('esp:D4', 'lora1:RST', 'gray'), C('esp:D2', 'lora1:DIO0', 'orange'),
+  ],
+});
+const OLED_AUTO = [
+  C('esp:D21', 'oled1:SDA', 'blue'), C('esp:D22', 'oled1:SCL', 'yellow'), C('esp:3V3', 'oled1:VCC', 'red'), C('esp:GND.2', 'oled1:GND', 'black'),
+];
+// diagram from groups of { parts, conns }
+const compose = (...groups) => diagram(groups.flatMap((g) => g.parts), groups.flatMap((g) => g.conns));
+const dhtAt = (left, top) => ({
+  parts: [{ type: 'esp32-iot-dht22', id: 'dht1', top, left, attrs: { temperature: 28.5, humidity: 65 } }],
+  conns: [C('esp:D15', 'dht1:SDA', 'green'), C('esp:3V3', 'dht1:VCC', 'red'), C('esp:GND.2', 'dht1:GND', 'black')],
+});
+
 export const EXAMPLES = [
   {
     id: 'blink', name: '01. Blink – Nháy LED', category: 'Cơ bản',
@@ -246,55 +312,76 @@ void loop() {
     ]),
   },
   {
-    id: 'lcd-dht', name: '06. DHT22 + LCD 16x2 I2C', category: 'Hiển thị',
-    code: `#include <Wire.h>
-#include <LiquidCrystal_I2C.h>
+    id: 'dht-oled', name: '06. DHT22 + OLED: nhiệt độ & độ ẩm', category: 'Cảm biến',
+    code: `// DHT22 đo nhiệt độ/độ ẩm, hiển thị trên OLED SSD1306 128x64 (I2C, địa chỉ 0x3C).
+// Khi chạy: chọn cảm biến DHT22 và kéo thanh "Nhiệt độ" / "Độ ẩm".
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 #include <DHT.h>
 
 #define DHTPIN 15
 #define DHTTYPE DHT22
 
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
 DHT dht(DHTPIN, DHTTYPE);
 
-byte degree[8] = {0b01100, 0b10010, 0b10010, 0b01100, 0, 0, 0, 0};
+// một dòng: nhãn nhỏ, giá trị chữ to, thanh mức trong khoảng [lo, hi]
+void drawValue(int y, const char* label, float v, const char* unit, float lo, float hi) {
+  display.setTextSize(1);
+  display.setCursor(0, y + 4);
+  display.print(label);
+  display.setTextSize(2);
+  display.setCursor(40, y);
+  display.print(v, 1);
+  int x = display.getCursorX();
+  if (unit[0] == 'C') {                       // font 5x7 không có dấu độ: vẽ vòng tròn nhỏ
+    display.drawCircle(x + 3, y + 2, 2, SSD1306_WHITE);
+    x += 8;
+  }
+  display.setCursor(x, y);
+  display.print(unit);
+  int w = constrain((int)((v - lo) * 126 / (hi - lo)), 0, 126);
+  display.drawRect(0, y + 18, 128, 5, SSD1306_WHITE);
+  display.fillRect(1, y + 19, w, 3, SSD1306_WHITE);
+}
 
 void setup() {
   Serial.begin(115200);
   dht.begin();
-  lcd.init();
-  lcd.backlight();
-  lcd.createChar(0, degree);
-  lcd.setCursor(0, 0);
-  lcd.print("ESP32 + DHT22");
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("Không tìm thấy OLED SSD1306!");
+    for (;;) delay(1000);
+  }
+  display.setTextColor(SSD1306_WHITE);
+  display.clearDisplay();
+  display.setCursor(24, 28);
+  display.print("ESP32 + DHT22");
+  display.display();
   delay(1000);
 }
 
 void loop() {
   float t = dht.readTemperature();
   float h = dht.readHumidity();
+  display.clearDisplay();
   if (isnan(t) || isnan(h)) {
     Serial.println("Lỗi đọc DHT22!");
-    lcd.clear();
-    lcd.print("DHT error");
+    display.setTextSize(1);
+    display.setCursor(0, 28);
+    display.print("Loi doc DHT22!");
+    display.display();
     delay(2000);
     return;
   }
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Nhiet do: ");
-  lcd.print(t, 1);
-  lcd.write(0);
-  lcd.print("C");
-  lcd.setCursor(0, 1);
-  lcd.print("Do am:    ");
-  lcd.print(h, 1);
-  lcd.print("%");
+  drawValue(0, "Nhiet", t, "C", -10, 50);
+  drawValue(34, "Do am", h, "%", 0, 100);
+  display.display();
   Serial.printf("T = %.1f C, H = %.1f %%\\n", t, h);
   delay(2000);
 }
 `,
-    diagram: diagram(DHT_LCD_PARTS, [...LCD_CONNS, ...DHT_CONNS]),
+    diagram: compose({ parts: OLED_PARTS, conns: OLED_AUTO }, dhtAt(260, 120)),
   },
   {
     id: 'oled', name: '07. OLED SSD1306 đồ họa', category: 'Hiển thị',
@@ -353,7 +440,7 @@ void loop() {
     code: `// Đo khoảng cách bằng HC-SR04, còi kêu khi vật cản < 30 cm
 const int TRIG = 18;
 const int ECHO = 5;
-const int BUZZER = 4;
+const int BUZZER = 4;      // buzzer nối sẵn trên kit: GPIO4 (DevKit), D3 (board mở rộng XIAO), A3 (C3 SuperMini)
 
 void setup() {
   Serial.begin(115200);
@@ -527,24 +614,38 @@ void loop() {
     ]),
   },
   {
-    id: 'http-get', name: '13. WiFi + HTTP GET thời tiết (JSON) → LCD', category: 'IoT',
+    id: 'http-get', name: '13. WiFi + HTTP GET thời tiết (JSON) → OLED', category: 'IoT',
     code: `#include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <LiquidCrystal_I2C.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
 const char* ssid = "ESP32-IoT-GUEST";
 const char* password = "";
 // Open-Meteo: API miễn phí, không cần khóa (Hà Nội)
 const char* url = "https://api.open-meteo.com/v1/forecast?latitude=21.03&longitude=105.85&current_weather=true";
 
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+
+void showMessage(const char* line1, const char* line2) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 20);
+  display.println(line1);
+  display.println(line2);
+  display.display();
+}
 
 void setup() {
   Serial.begin(115200);
-  lcd.init();
-  lcd.backlight();
-  lcd.print("Connecting WiFi");
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("Không tìm thấy OLED SSD1306!");
+    for (;;) delay(1000);
+  }
+  display.setTextColor(SSD1306_WHITE);
+  showMessage("Dang ket noi WiFi", ssid);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(250);
@@ -553,6 +654,7 @@ void setup() {
   Serial.println();
   Serial.print("WiFi OK, IP: ");
   Serial.println(WiFi.localIP());
+  showMessage("WiFi OK, IP:", WiFi.localIP().toString().c_str());
 }
 
 void loop() {
@@ -567,28 +669,41 @@ void loop() {
     if (!err) {
       float temp = doc["current_weather"]["temperature"];
       float wind = doc["current_weather"]["windspeed"];
+      String time = doc["current_weather"]["time"] | "";
       Serial.printf("Ha Noi: %.1f C, gio %.1f km/h\\n", temp, wind);
-      lcd.clear();
-      lcd.print("Ha Noi ");
-      lcd.print(temp, 1);
-      lcd.print((char)223);
-      lcd.print("C");
-      lcd.setCursor(0, 1);
-      lcd.print("Gio: ");
-      lcd.print(wind, 1);
-      lcd.print(" km/h");
+
+      display.clearDisplay();
+      display.setTextSize(1);
+      display.setCursor(0, 0);
+      display.print("Ha Noi");
+      display.setCursor(128 - 6 * 5, 0);
+      display.print(time.substring(11, 16));           // giờ cập nhật hh:mm (GMT)
+      display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
+      display.setTextSize(3);
+      display.setCursor(0, 18);
+      display.print(temp, 1);
+      int x = display.getCursorX();
+      display.drawCircle(x + 4, 20, 3, SSD1306_WHITE);   // dấu độ
+      display.setCursor(x + 10, 18);
+      display.print("C");
+      display.setTextSize(1);
+      display.setCursor(0, 54);
+      display.printf("Gio: %.1f km/h", wind);
+      display.display();
     } else {
       Serial.print("JSON error: ");
       Serial.println(err.c_str());
+      showMessage("Loi JSON:", err.c_str());
     }
   } else {
     Serial.println("Lỗi: " + http.errorToString(code));
+    showMessage("Loi HTTP", http.errorToString(code).c_str());
   }
   http.end();
   delay(30000);
 }
 `,
-    diagram: diagram([DHT_LCD_PARTS[0]], LCD_CONNS),
+    diagram: diagram(OLED_PARTS, OLED_CONNS),
   },
   {
     id: 'http-post', name: '14. HTTP POST dữ liệu cảm biến (JSON)', category: 'IoT',
@@ -982,5 +1097,889 @@ void loop() {
 }
 `,
     diagram: diagram([DHT_LCD_PARTS[0]], LCD_CONNS),
+  },
+
+  // ---------------------------------------------------------------- digital-output sensors
+  {
+    id: 'ldr-digital', name: '22. Ánh sáng (DO): đèn ngủ tự động', category: 'Cảm biến số (digital)',
+    code: `// Đèn ngủ tự động dùng chân DO (digital) của module quang trở.
+// Module có bộ so sánh LM393: DO = HIGH khi trời tối (độ sáng dưới ngưỡng), LOW khi sáng.
+// Ngưỡng được chỉnh bằng biến trở trên module (thuộc tính "Ngưỡng DO").
+// Khi chạy: chọn cảm biến và kéo thanh "Độ sáng (lux)" xuống dưới ngưỡng để đèn bật.
+const int LDR_DO = 35;   // GPIO35: chân chỉ vào (input-only), module tự đẩy mức HIGH/LOW
+const int LAMP_PIN = 4;
+
+int lastState = -1;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LDR_DO, INPUT);
+  pinMode(LAMP_PIN, OUTPUT);
+  Serial.println("Đèn ngủ tự động (LDR - chân DO)");
+}
+
+void loop() {
+  int dark = digitalRead(LDR_DO);
+  if (dark != lastState) {          // chỉ in khi trạng thái thay đổi
+    lastState = dark;
+    digitalWrite(LAMP_PIN, dark);
+    Serial.println(dark ? "Trời tối  -> BẬT đèn" : "Trời sáng -> TẮT đèn");
+  }
+  delay(100);
+}
+`,
+    diagram: compose(sensorLeft('esp32-iot-photoresistor-sensor', 'ldr1', { lux: 500, threshold: 100 }, 98, [['D35', 'DO', 'purple']]), LED_D4),
+  },
+  {
+    id: 'flame-digital', name: '23. Cảm biến lửa (DO): báo cháy', category: 'Cảm biến số (digital)',
+    code: `// Báo cháy với cảm biến lửa hồng ngoại (IR 760–1100 nm).
+// Chân DO tích cực mức THẤP: LOW = phát hiện lửa (cường độ vượt ngưỡng của biến trở trên module).
+// Khi chạy: chọn cảm biến, kéo "Cường độ lửa (%)" lên trên ngưỡng.
+const int FLAME_DO = 35;
+const int LED_PIN = 5;
+const int BUZZER_PIN = 4;    // buzzer nối sẵn trên kit: GPIO4 (DevKit), D3 (board mở rộng XIAO), A3 (C3 SuperMini)
+
+bool lastFire = false;
+unsigned long fireCount = 0;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(FLAME_DO, INPUT);
+  pinMode(LED_PIN, OUTPUT);
+  Serial.println("Hệ thống báo cháy sẵn sàng");
+}
+
+void loop() {
+  bool fire = digitalRead(FLAME_DO) == LOW;
+  if (fire != lastFire) {
+    lastFire = fire;
+    if (fire) {
+      fireCount++;
+      Serial.printf("🔥 PHÁT HIỆN LỬA! (lần %lu)\\n", fireCount);
+    } else {
+      Serial.println("Hết lửa - tắt báo động");
+      noTone(BUZZER_PIN);
+      digitalWrite(LED_PIN, LOW);
+    }
+  }
+  if (fire) {
+    // còi hai tông + LED nháy
+    bool phase = (millis() / 250) % 2;
+    tone(BUZZER_PIN, phase ? 2500 : 1800);
+    digitalWrite(LED_PIN, phase);
+  }
+  delay(20);
+}
+`,
+    diagram: compose(sensorLeft('esp32-iot-flame-sensor', 'flame1', { flame: 0, threshold: 40 }, 122, [['D35', 'DO', 'purple']]), LED_D5, buzzerAt()),
+  },
+  {
+    id: 'gas-digital', name: '24. Khí gas MQ-2 (DO) + ngắt ngoài', category: 'Cảm biến số (digital)',
+    code: `// Báo rò rỉ khí gas: module MQ-2, chân DO xuống LOW khi nồng độ vượt ngưỡng.
+// Dùng ngắt ngoài (attachInterrupt) để không bỏ lỡ sự kiện dù loop() đang bận.
+// Đấu nối như MQ-2 thật: VCC -> VIN (5 V, dây nung cần 5 V); DO ra mức 0/5 V nên phải qua cầu phân áp
+// DO -> 10 kΩ -> GPIO34 -> 20 kΩ -> GND (mức HIGH còn 3.3 V, an toàn cho ESP32).
+// Ngưỡng DO chỉnh bằng biến trở trên module (thuộc tính "Ngưỡng DO").
+// Cảm biến cần làm nóng (≥ 1–3 phút, mô phỏng: 2 s) trước khi báo động ổn định.
+// Khi chạy: chọn cảm biến, kéo "Nồng độ khí (ppm)" vượt "Ngưỡng DO".
+const int GAS_DO = 34;
+const int LED_PIN = 5;
+const int BUZZER_PIN = 4;    // buzzer nối sẵn trên kit: GPIO4 (DevKit), D3 (board mở rộng XIAO), A3 (C3 SuperMini)
+
+volatile bool changed = false;
+
+void IRAM_ATTR onGasChange() {
+  changed = true;        // trong ISR chỉ đặt cờ, xử lý ở loop()
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(GAS_DO, INPUT);
+  pinMode(LED_PIN, OUTPUT);
+  attachInterrupt(digitalPinToInterrupt(GAS_DO), onGasChange, CHANGE);
+  Serial.println("Đang làm nóng cảm biến MQ-2...");
+  delay(2000);
+  Serial.println("Giám sát khí gas bắt đầu");
+  changed = true;        // kiểm tra trạng thái ban đầu
+}
+
+void loop() {
+  if (changed) {
+    changed = false;
+    bool leak = digitalRead(GAS_DO) == LOW;
+    digitalWrite(LED_PIN, leak);
+    if (leak) {
+      tone(BUZZER_PIN, 3000);
+      Serial.println("⚠ CẢNH BÁO: phát hiện khí gas vượt ngưỡng!");
+    } else {
+      noTone(BUZZER_PIN);
+      Serial.println("Không khí bình thường");
+    }
+  }
+  delay(50);
+}
+`,
+    diagram: compose(mq2At5V('DO', 'D34'), LED_D5, buzzerAt()),
+  },
+
+  // ---------------------------------------------------------------- analog-output sensors
+  {
+    id: 'ldr-analog', name: '25. Ánh sáng (AO): đèn tự điều chỉnh độ sáng', category: 'Cảm biến tương tự (analog)',
+    code: `// Đọc chân AO (analog) của module quang trở: điện áp càng cao khi càng tối.
+// Đèn LED (PWM) sáng mạnh dần khi môi trường tối đi.
+// Khi chạy: chọn cảm biến và kéo thanh "Độ sáng (lux)".
+const int LDR_AO = 34;     // ADC1
+const int LED_PIN = 4;
+
+const int ADC_BRIGHT = 450;   // giá trị ADC khi rất sáng (≈ 2000 lux) – đo lại khi dùng module thật
+const int ADC_DARK = 3900;    // giá trị ADC khi rất tối
+
+void setup() {
+  Serial.begin(115200);
+  analogReadResolution(12);    // 0..4095
+  pinMode(LED_PIN, OUTPUT);
+}
+
+void loop() {
+  // lấy trung bình 8 lần đọc cho ổn định
+  long sum = 0;
+  for (int i = 0; i < 8; i++) sum += analogRead(LDR_AO);
+  int raw = sum / 8;
+
+  int light = constrain(map(raw, ADC_DARK, ADC_BRIGHT, 0, 100), 0, 100);    // % độ sáng môi trường
+  int duty = constrain(map(raw, ADC_BRIGHT, ADC_DARK, 0, 255), 0, 255);      // tối hơn -> đèn sáng hơn
+  analogWrite(LED_PIN, duty);
+
+  float volt = analogReadMilliVolts(LDR_AO) / 1000.0;
+  Serial.printf("ADC=%4d  (%.2f V)  ánh sáng=%3d%%  độ sáng đèn=%3d/255\\n", raw, volt, light, duty);
+  delay(500);
+}
+`,
+    diagram: compose(sensorLeft('esp32-iot-photoresistor-sensor', 'ldr1', { lux: 120, threshold: 100 }, 98, [['D34', 'AO', 'green']]), LED_D4),
+  },
+  {
+    id: 'rain-analog', name: '26. Cảm biến mưa (AO): tự đóng mái che', category: 'Cảm biến tương tự (analog)',
+    code: `// Cảm biến mưa: tấm cảm biến càng ướt thì điện trở càng nhỏ -> điện áp AO càng THẤP.
+// Phân 3 mức (khô / mưa nhỏ / mưa to) và dùng servo đóng mái che khi trời mưa.
+// Khi chạy: chọn cảm biến và kéo "Mức mưa (%)".
+#include <ESP32Servo.h>
+
+const int RAIN_AO = 32;
+const int SERVO_PIN = 18;
+const int ADC_DRY = 4095;     // tấm khô
+const int ADC_WET = 500;      // tấm ướt hoàn toàn
+
+Servo roof;
+int lastLevel = -1;
+const char* LEVELS[] = {"Khô ráo", "Mưa nhỏ", "Mưa to"};
+
+void setup() {
+  Serial.begin(115200);
+  roof.attach(SERVO_PIN);
+  roof.write(0);              // 0° = mái mở
+}
+
+void loop() {
+  int raw = analogRead(RAIN_AO);
+  int wet = constrain(map(raw, ADC_DRY, ADC_WET, 0, 100), 0, 100);
+  int level = wet < 20 ? 0 : (wet < 60 ? 1 : 2);
+  Serial.printf("ADC=%4d  độ ướt=%3d%%  -> %s\\n", raw, wet, LEVELS[level]);
+  if (level != lastLevel) {
+    lastLevel = level;
+    roof.write(level == 0 ? 0 : 90);
+    Serial.println(level == 0 ? ">> Mở mái che" : ">> Đóng mái che");
+  }
+  delay(1000);
+}
+`,
+    diagram: compose(sensorLeft('esp32-iot-rain-sensor', 'rain1', { rain: 0, threshold: 30 }, 174, [['D32', 'AO', 'green']], 60), {
+      parts: [{ type: 'esp32-iot-servo', id: 'servo1', top: 110, left: 210, attrs: {} }],
+      conns: [C('esp:D18', 'servo1:PWM', 'orange'), C('esp:3V3', 'servo1:V+', 'red'), C('esp:GND.2', 'servo1:GND', 'black')],
+    }),
+  },
+  {
+    id: 'water-level', name: '27. Cảm biến mực nước (AO): báo mức bồn', category: 'Cảm biến tương tự (analog)',
+    code: `// Cảm biến mực nước: phần ngập trong nước càng dài, điện áp chân S càng cao.
+// Cấp nguồn cho cảm biến từ một chân GPIO và chỉ bật khi đo -> các đường đồng ít bị ăn mòn (điện phân).
+// 3 LED báo mức: xanh (thấp), vàng (vừa), đỏ (cao). Khi chạy: chọn cảm biến, kéo "Mực nước (%)".
+const int SENSOR_POWER = 27;
+const int SENSOR_SIG = 33;
+const int LED_LOW = 19, LED_MID = 18, LED_HIGH = 5;
+
+const int ADC_EMPTY = 0;      // hiệu chỉnh: đọc khi cảm biến khô
+const int ADC_FULL = 3480;    // hiệu chỉnh: đọc khi ngập đến vạch trên cùng
+
+int readLevel() {
+  digitalWrite(SENSOR_POWER, HIGH);   // bật nguồn cảm biến
+  delay(10);                          // chờ ổn định
+  int raw = analogRead(SENSOR_SIG);
+  digitalWrite(SENSOR_POWER, LOW);    // tắt nguồn
+  return raw;
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(SENSOR_POWER, OUTPUT);
+  digitalWrite(SENSOR_POWER, LOW);
+  pinMode(LED_LOW, OUTPUT);
+  pinMode(LED_MID, OUTPUT);
+  pinMode(LED_HIGH, OUTPUT);
+}
+
+void loop() {
+  int raw = readLevel();
+  int percent = constrain(map(raw, ADC_EMPTY, ADC_FULL, 0, 100), 0, 100);
+  digitalWrite(LED_LOW, percent > 5);
+  digitalWrite(LED_MID, percent >= 40);
+  digitalWrite(LED_HIGH, percent >= 80);
+  Serial.printf("ADC=%4d  mực nước=%3d%%  %s\\n", raw, percent, percent >= 90 ? "⚠ SẮP TRÀN!" : (percent <= 5 ? "Bồn cạn" : ""));
+  delay(1000);
+}
+`,
+    diagram: diagram([
+      { type: 'esp32-iot-water-level-sensor', id: 'wl1', top: 110, left: -110, attrs: { level: 30 } },
+      { type: 'esp32-iot-resistor', id: 'r1', top: 114, left: 150, attrs: { value: '220' } },
+      { type: 'esp32-iot-resistor', id: 'r2', top: 126, left: 150, attrs: { value: '220' } },
+      { type: 'esp32-iot-resistor', id: 'r3', top: 138, left: 150, attrs: { value: '220' } },
+      { type: 'esp32-iot-led', id: 'led1', top: 20, left: 240, attrs: { color: 'green' } },
+      { type: 'esp32-iot-led', id: 'led2', top: 20, left: 280, attrs: { color: 'yellow' } },
+      { type: 'esp32-iot-led', id: 'led3', top: 20, left: 320, attrs: { color: 'red' } },
+    ], [
+      C('esp:D33', 'wl1:S', 'green'), C('esp:D27', 'wl1:VCC', 'red'), C('esp:GND.1', 'wl1:GND', 'black'),
+      C('esp:D19', 'r1:1', 'green'), C('esp:D18', 'r2:1', 'yellow'), C('esp:D5', 'r3:1', 'orange'),
+      C('r1:2', 'led1:A', 'green'), C('r2:2', 'led2:A', 'yellow'), C('r3:2', 'led3:A', 'orange'),
+      C('led1:C', 'esp:GND.2', 'black'), C('led2:C', 'esp:GND.2', 'black'), C('led3:C', 'esp:GND.2', 'black'),
+    ]),
+  },
+  {
+    id: 'soil-irrigation', name: '28. Độ ẩm đất (AO): tưới cây tự động', category: 'Cảm biến tương tự (analog)',
+    code: `// Tưới cây tự động: đọc độ ẩm đất (AO) và bật máy bơm qua relay.
+// Đất càng ẩm -> điện áp AO càng THẤP. Dùng 2 ngưỡng (trễ / hysteresis) để bơm không bật tắt liên tục.
+// Máy bơm 5 V được mô phỏng bằng bóng đèn nối qua tiếp điểm COM–NO của relay.
+// Khi chạy: chọn cảm biến, kéo "Độ ẩm đất (%)".
+const int SOIL_AO = 32;
+const int RELAY_PIN = 4;
+
+const int ADC_DRY = 3890;     // hiệu chỉnh: cảm biến để ngoài không khí
+const int ADC_WET = 1020;     // hiệu chỉnh: cảm biến nhúng trong nước
+const int START_BELOW = 30;   // % – bắt đầu tưới
+const int STOP_ABOVE = 60;    // % – ngừng tưới
+
+bool pumping = false;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, LOW);
+  Serial.println("Hệ thống tưới tự động");
+}
+
+void loop() {
+  int raw = analogRead(SOIL_AO);
+  int moisture = constrain(map(raw, ADC_DRY, ADC_WET, 0, 100), 0, 100);
+  if (!pumping && moisture < START_BELOW) {
+    pumping = true;
+    Serial.println(">> Đất khô: BẬT máy bơm");
+  } else if (pumping && moisture > STOP_ABOVE) {
+    pumping = false;
+    Serial.println(">> Đủ ẩm: TẮT máy bơm");
+  }
+  digitalWrite(RELAY_PIN, pumping ? HIGH : LOW);
+  Serial.printf("ADC=%4d  độ ẩm=%3d%%  bơm: %s\\n", raw, moisture, pumping ? "ĐANG TƯỚI" : "nghỉ");
+  delay(1000);
+}
+`,
+    diagram: compose(sensorLeft('esp32-iot-soil-moisture-sensor', 'soil1', { moisture: 35, threshold: 40 }, 144, [['D32', 'AO', 'green']], 60), relayLamp('D4', 150)),
+  },
+  {
+    id: 'gas-analog', name: '29. Khí gas MQ-2 (AO): đo ppm + OLED', category: 'Cảm biến tương tự (analog)',
+    code: `// Đo nồng độ khí gas (LPG) với module MQ-2 qua chân AO, hiển thị lên OLED SSD1306.
+//
+// Đấu nối như MQ-2 thật:
+//  - VCC module -> VIN (5 V): dây nung của MQ-2 cần 5 V (~150 mA), cấp 3.3 V sẽ đo sai.
+//  - AO ra tới 5 V, vượt mức 3.6 V tối đa của ESP32 -> qua cầu phân áp: AO -> 10 kΩ -> GPIO34 -> 20 kΩ -> GND
+//    (điện áp vào GPIO = AO × 20/30, AO = 5 V -> 3.33 V).
+//
+// Tính ppm: Vout = VCC × RL / (RL + Rs)  =>  Rs = RL × (VCC − Vout) / Vout
+//           log10(Rs/R0) = M × log10(ppm) + B   (đường LPG trong datasheet)
+// Hiệu chỉnh khi dùng module thật:
+//  - RL: điện trở tải trên module (đo hoặc đọc mã in, vd. 102 = 1 kΩ, 502 = 5 kΩ).
+//  - R0: đặt CALIBRATE = true, để cảm biến ở nơi không khí sạch, nạp code: R0 = Rs / 9.83 được in ra -> ghi vào R0.
+//  - Cảm biến mới cần "nung" 24–48 h lần đầu; mỗi lần bật cần làm nóng ≥ 1–3 phút (WARMUP_MS).
+// Buzzer nối sẵn trên kit (GPIO4 trên DevKit, D3 trên board mở rộng XIAO), kêu khi vượt 3000 ppm.
+// Khi chạy: chọn cảm biến, kéo "Nồng độ khí (ppm)".
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+const int GAS_AO = 34;
+const int BUZZER_PIN = 4;
+const float VCC = 5.0;                          // điện áp cấp cho module MQ-2
+const float DIVIDER = (10.0 + 20.0) / 20.0;     // hệ số cầu phân áp: AO = V(GPIO) × 1.5
+const float RL = 5.0;                           // kΩ – điện trở tải trên module
+float R0 = 10.0;                                // kΩ – kết quả hiệu chỉnh trong không khí sạch
+const float CLEAN_AIR_RATIO = 9.83;             // Rs/R0 trong không khí sạch (datasheet)
+const float M = -0.455, B = 1.251;              // đường LPG
+const bool CALIBRATE = false;
+const unsigned long WARMUP_MS = 10000;          // mô phỏng: 10 s; MQ-2 thật nên ≥ 60 000
+
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+
+// điện áp chân AO (trước cầu phân áp), trung bình 16 lần đọc
+float readAoVolt() {
+  long mv = 0;
+  for (int i = 0; i < 16; i++) mv += analogReadMilliVolts(GAS_AO);   // đã hiệu chỉnh ADC của ESP32
+  return mv / 16.0 / 1000.0 * DIVIDER;
+}
+
+float readRs() {
+  float v = readAoVolt();
+  if (v < 0.01) v = 0.01;
+  return RL * (VCC - v) / v;
+}
+
+float ppmFromRs(float rs) {
+  return pow(10, (log10(rs / R0) - B) / M);
+}
+
+void calibrate() {
+  Serial.println("Hiệu chỉnh R0 trong không khí sạch...");
+  float sum = 0;
+  for (int i = 0; i < 50; i++) { sum += readRs(); delay(100); }
+  R0 = sum / 50 / CLEAN_AIR_RATIO;
+  Serial.printf("R0 = %.2f kΩ  -> ghi giá trị này vào biến R0 rồi đặt CALIBRATE = false\\n", R0);
+}
+
+void setup() {
+  Serial.begin(115200);
+  analogSetPinAttenuation(GAS_AO, ADC_11db);    // dải đo 0 – ~3.1 V
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("Không tìm thấy OLED SSD1306!");
+    for (;;) delay(1000);
+  }
+  display.setTextColor(SSD1306_WHITE);
+}
+
+void loop() {
+  unsigned long t = millis();
+  if (t < WARMUP_MS) {                           // làm nóng dây nung, chưa đo
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setCursor(0, 20);
+    display.println("MQ-2 dang lam nong...");
+    display.printf("con %lu s", (WARMUP_MS - t) / 1000 + 1);
+    display.display();
+    delay(500);
+    return;
+  }
+  static bool calibrated = false;
+  if (CALIBRATE && !calibrated) { calibrate(); calibrated = true; }
+
+  float vao = readAoVolt();
+  float rs = readRs();
+  float ppm = ppmFromRs(rs);
+  bool danger = ppm >= 3000;
+  const char* level = ppm < 1000 ? "AN TOAN" : (danger ? "NGUY HIEM!" : "CANH BAO");
+  Serial.printf("AO=%.2f V  Rs=%.2f kΩ  Rs/R0=%.2f  LPG≈%6.0f ppm  -> %s\\n", vao, rs, rs / R0, ppm, level);
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.printf("AO %.2fV  Rs %.1fk", vao, rs);
+  display.setTextSize(2);
+  display.setCursor(0, 14);
+  display.printf("%.0f", ppm);
+  display.setTextSize(1);
+  display.print(" ppm");
+  // thanh mức theo thang log (100 … 10000 ppm)
+  int w = constrain((int)((log10(max(ppm, 100.0f)) - 2) / 2 * 126), 0, 126);
+  display.drawRect(0, 34, 128, 8, SSD1306_WHITE);
+  display.fillRect(1, 35, w, 6, SSD1306_WHITE);
+  // trạng thái: chữ đảo màu khi nguy hiểm
+  if (danger && (millis() / 500) % 2) {
+    display.fillRect(0, 48, 128, 16, SSD1306_WHITE);
+    display.setTextColor(SSD1306_BLACK);
+  }
+  display.setTextSize(2);
+  display.setCursor(0, 49);
+  display.print(level);
+  display.setTextColor(SSD1306_WHITE);
+  display.display();
+
+  if (danger) tone(BUZZER_PIN, 2800);
+  else noTone(BUZZER_PIN);
+  delay(500);
+}
+`,
+    diagram: compose(mq2At5V('AO', 'D34'), { parts: OLED_PARTS, conns: OLED_AUTO }, buzzerAt('D4', 300, 130)),
+  },
+
+  // ---------------------------------------------------------------- actuators
+  {
+    id: 'relay', name: '30. Relay: bật/tắt bóng đèn bằng nút & Serial', category: 'Chấp hành',
+    code: `// Module relay 1 kênh (kích mức HIGH) đóng/ngắt bóng đèn 5 V: VIN -> COM, NO -> bóng đèn -> GND.
+// Relay cách ly mạch điều khiển 3.3 V với tải; tiếp điểm NO đóng khi cuộn dây có điện.
+// Điều khiển: nhấn nút (GPIO15) hoặc gõ ON / OFF / TOGGLE / TIMER <giây> trong Serial Monitor.
+const int RELAY_PIN = 4;
+const int BUTTON_PIN = 15;
+
+bool relayOn = false;
+unsigned long offAt = 0;      // tự tắt sau một khoảng thời gian (0 = không hẹn giờ)
+int lastButton = HIGH;
+
+void setRelay(bool on, const char* why) {
+  relayOn = on;
+  digitalWrite(RELAY_PIN, on ? HIGH : LOW);
+  Serial.printf("Relay %s (%s)\\n", on ? "BẬT - đèn sáng" : "TẮT - đèn tắt", why);
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(RELAY_PIN, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  setRelay(false, "khởi động");
+  Serial.println("Lệnh: ON, OFF, TOGGLE, TIMER 5");
+}
+
+void loop() {
+  int b = digitalRead(BUTTON_PIN);
+  if (b != lastButton) {
+    lastButton = b;
+    if (b == LOW) setRelay(!relayOn, "nút nhấn");
+    delay(30);   // chống dội phím
+  }
+
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\\n');
+    cmd.trim();
+    cmd.toUpperCase();
+    if (cmd == "ON") setRelay(true, "lệnh Serial");
+    else if (cmd == "OFF") setRelay(false, "lệnh Serial");
+    else if (cmd == "TOGGLE") setRelay(!relayOn, "lệnh Serial");
+    else if (cmd.startsWith("TIMER")) {
+      int s = cmd.substring(5).toInt();
+      if (s <= 0) s = 5;
+      setRelay(true, "hẹn giờ");
+      offAt = millis() + s * 1000UL;
+      Serial.printf("Tự tắt sau %d giây\\n", s);
+    } else if (cmd.length()) Serial.println("Lệnh không hợp lệ: " + cmd);
+  }
+
+  if (offAt && millis() >= offAt) {
+    offAt = 0;
+    setRelay(false, "hết giờ");
+  }
+  delay(10);
+}
+`,
+    diagram: compose(relayLamp('D4'), BUTTON_D15),
+  },
+
+  // ---------------------------------------------------------------- radio
+  {
+    id: 'lora-sender', name: '31. LoRa: node gửi nhiệt độ/độ ẩm', category: 'Truyền thông',
+    code: `// LoRa SX1278 (Ra-02, 433 MHz) qua SPI: gửi nhiệt độ/độ ẩm DHT22 mỗi 5 giây.
+// Thư viện: LoRa by Sandeep Mistry (#include <LoRa.h>).
+// Thử nghiệm: mở trình giả lập ở MỘT TAB KHÁC với ví dụ "32. LoRa: node nhận" rồi chạy cả hai —
+// các tab chung một "không gian sóng" ảo. Tần số, spreading factor và sync word hai bên phải giống nhau.
+#include <SPI.h>
+#include <LoRa.h>
+#include <DHT.h>
+
+#define LORA_SS 5      // NSS
+#define LORA_RST 4
+#define LORA_DIO0 2
+#define DHT_PIN 15
+
+DHT dht(DHT_PIN, DHT22);
+int counter = 0;
+
+void setup() {
+  Serial.begin(115200);
+  dht.begin();
+  LoRa.setPins(LORA_SS, LORA_RST, LORA_DIO0);   // SCK/MISO/MOSI = 18/19/23 (SPI mặc định)
+  if (!LoRa.begin(433E6)) {
+    Serial.println("Khởi động LoRa thất bại! Kiểm tra dây nối.");
+    while (true) delay(1000);
+  }
+  LoRa.setSpreadingFactor(7);
+  LoRa.setSyncWord(0xF3);      // "mạng riêng": chỉ node cùng sync word mới nhận
+  LoRa.setTxPower(17);
+  Serial.println("LoRa node gửi: 433 MHz, SF7, sync word 0xF3");
+}
+
+void loop() {
+  float t = dht.readTemperature();
+  float h = dht.readHumidity();
+  String msg = "#" + String(counter) + " T=" + String(t, 1) + "C H=" + String(h, 0) + "%";
+
+  Serial.print("Gửi gói: ");
+  Serial.println(msg);
+  LoRa.beginPacket();
+  LoRa.print(msg);
+  LoRa.endPacket();            // chờ phát xong (thời gian phát phụ thuộc SF/BW/độ dài)
+  counter++;
+  delay(5000);
+}
+`,
+    diagram: compose(loraRight(), dhtAt(330, 150)),
+  },
+  {
+    id: 'lora-receiver', name: '32. LoRa: node nhận + OLED (RSSI/SNR)', category: 'Truyền thông',
+    code: `// LoRa SX1278: nhận gói tin, in nội dung + RSSI/SNR và hiển thị lên OLED SSD1306 kèm vạch sóng.
+// Chạy cùng ví dụ "31. LoRa: node gửi" ở một tab khác, hoặc chọn module LoRa
+// và bấm "Nhận gói tin thử" để giả lập một gói từ node khác (sửa nội dung/RSSI trong thuộc tính).
+#include <SPI.h>
+#include <LoRa.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define LORA_SS 5
+#define LORA_RST 4
+#define LORA_DIO0 2
+
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+unsigned long packets = 0;
+
+// 4 vạch sóng theo RSSI: > -70, -85, -100, -115 dBm
+void drawSignal(int x, int y, int rssi) {
+  for (int i = 0; i < 4; i++) {
+    int h = 3 + i * 3;
+    if (rssi > -70 - (3 - i) * 15) display.fillRect(x + i * 5, y - h, 3, h, SSD1306_WHITE);
+    else display.drawRect(x + i * 5, y - h, 3, h, SSD1306_WHITE);
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_BUILTIN, OUTPUT);
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("Không tìm thấy OLED SSD1306!");
+    for (;;) delay(1000);
+  }
+  display.setTextColor(SSD1306_WHITE);
+  display.clearDisplay();
+  LoRa.setPins(LORA_SS, LORA_RST, LORA_DIO0);
+  if (!LoRa.begin(433E6)) {
+    Serial.println("Khởi động LoRa thất bại!");
+    display.setCursor(0, 28);
+    display.print("LoRa loi!");
+    display.display();
+    while (true) delay(1000);
+  }
+  LoRa.setSpreadingFactor(7);
+  LoRa.setSyncWord(0xF3);
+  Serial.println("LoRa node nhận: đang chờ gói tin...");
+  display.setCursor(0, 0);
+  display.print("LoRa 433 MHz SF7");
+  display.setCursor(0, 28);
+  display.print("Cho goi tin...");
+  display.display();
+}
+
+void loop() {
+  int packetSize = LoRa.parsePacket();
+  if (packetSize) {
+    String data = "";
+    while (LoRa.available()) data += (char)LoRa.read();
+    int rssi = LoRa.packetRssi();
+    float snr = LoRa.packetSnr();
+    packets++;
+    Serial.printf("[%lu] Nhận %d byte: \\"%s\\"  RSSI=%d dBm  SNR=%.1f dB\\n", packets, packetSize, data.c_str(), rssi, snr);
+
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.printf("Goi #%lu  %d byte", packets, packetSize);
+    drawSignal(108, 10, rssi);
+    display.drawFastHLine(0, 12, 128, SSD1306_WHITE);
+    display.setCursor(0, 16);
+    display.print(data);                       // tự xuống dòng khi dài
+    display.setCursor(0, 56);
+    display.printf("RSSI %d  SNR %.1f", rssi, snr);
+    display.display();
+
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(100);
+    digitalWrite(LED_BUILTIN, LOW);
+  }
+}
+`,
+    diagram: compose(loraRight(120), { parts: OLED_PARTS, conns: OLED_AUTO }),
+  },
+  {
+    id: 'espnow-sender', name: '33. ESP-NOW: gửi struct (broadcast)', category: 'Truyền thông',
+    code: `// ESP-NOW: gửi dữ liệu trực tiếp giữa các ESP32, không cần router WiFi (tối đa 250 byte/gói).
+// Gửi một struct (biến trở + nút nhấn) tới địa chỉ broadcast FF:FF:FF:FF:FF:FF mỗi giây và ngay khi nhấn nút.
+// Thử nghiệm: mở ví dụ "34. ESP-NOW: nhận struct" ở một tab khác rồi chạy cả hai.
+// Muốn gửi riêng (unicast) cho một board: thay broadcastAddress bằng MAC board nhận (in ở Serial của nó).
+#include <WiFi.h>
+#include <esp_now.h>
+
+const int POT_PIN = 34;
+const int BUTTON_PIN = 15;
+uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+// struct phải giống hệt bên nhận
+typedef struct {
+  int id;
+  int potValue;
+  bool button;
+  float voltage;
+  char text[32];
+} struct_message;
+
+struct_message myData;
+esp_now_peer_info_t peerInfo;
+int lastButton = HIGH;
+unsigned long lastSend = 0;
+int counter = 0;
+
+// arduino-esp32 3.3+: (const wifi_tx_info_t *info, ...); bản cũ: (const uint8_t *mac_addr, ...)
+void OnDataSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "  -> gửi thành công" : "  -> gửi thất bại");
+}
+
+void sendData() {
+  myData.id = counter++;
+  myData.potValue = analogRead(POT_PIN);
+  myData.button = digitalRead(BUTTON_PIN) == LOW;
+  myData.voltage = myData.potValue * 3.3 / 4095;
+  snprintf(myData.text, sizeof(myData.text), "Gói số %d", myData.id);
+  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *)&myData, sizeof(myData));
+  Serial.printf("Gửi #%d: pot=%d nút=%d (%d byte) %s\\n", myData.id, myData.potValue, myData.button, sizeof(myData),
+                result == ESP_OK ? "" : esp_err_to_name(result));
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  WiFi.mode(WIFI_STA);
+  Serial.print("MAC của board gửi: ");
+  Serial.println(WiFi.macAddress());
+
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Lỗi khởi tạo ESP-NOW");
+    return;
+  }
+  esp_now_register_send_cb(OnDataSent);
+
+  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("Không thêm được peer");
+    return;
+  }
+}
+
+void loop() {
+  int b = digitalRead(BUTTON_PIN);
+  if (b != lastButton || millis() - lastSend > 1000) {
+    lastButton = b;
+    lastSend = millis();
+    sendData();
+  }
+  delay(20);
+}
+`,
+    diagram: compose(POT_LEFT, BUTTON_D15),
+  },
+  {
+    id: 'espnow-receiver', name: '34. ESP-NOW: nhận struct → LED', category: 'Truyền thông',
+    code: `// ESP-NOW: nhận struct từ ví dụ "33. ESP-NOW: gửi struct" (chạy ở tab khác).
+// Biến trở bên gửi điều khiển độ sáng LED (PWM), nút nhấn bên gửi bật LED trên board.
+#include <WiFi.h>
+#include <esp_now.h>
+
+const int LED_PIN = 4;
+
+typedef struct {
+  int id;
+  int potValue;
+  bool button;
+  float voltage;
+  char text[32];
+} struct_message;
+
+struct_message incoming;
+volatile bool hasData = false;
+
+// arduino-esp32 3.x: (const esp_now_recv_info_t *info, ...); bản 2.x: (const uint8_t *mac, ...)
+void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  memcpy(&incoming, data, sizeof(incoming));
+  const uint8_t *mac = info->src_addr;
+  Serial.printf("Từ %02X:%02X:%02X:%02X:%02X:%02X (%d byte): #%d \\"%s\\" pot=%d (%.2f V) nút=%s\\n",
+                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], len,
+                incoming.id, incoming.text, incoming.potValue, incoming.voltage, incoming.button ? "NHẤN" : "thả");
+  hasData = true;
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
+  WiFi.mode(WIFI_STA);
+  Serial.print("MAC của board nhận: ");
+  Serial.println(WiFi.macAddress());
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Lỗi khởi tạo ESP-NOW");
+    return;
+  }
+  esp_now_register_recv_cb(OnDataRecv);
+  Serial.println("Đang chờ dữ liệu ESP-NOW...");
+}
+
+void loop() {
+  if (hasData) {
+    hasData = false;
+    analogWrite(LED_PIN, map(incoming.potValue, 0, 4095, 0, 255));
+    digitalWrite(LED_BUILTIN, incoming.button);
+  }
+  delay(10);
+}
+`,
+    diagram: diagram(LED_D4.parts, LED_D4.conns),
+  },
+
+  // ---------------------------------------------------------------- protocols
+  {
+    id: 'coap-server', name: '35. CoAP server: LED & nhiệt độ', category: 'Giao thức',
+    code: `// CoAP (Constrained Application Protocol, RFC 7252): giao thức kiểu REST chạy trên UDP cho thiết bị IoT.
+// Board này là CoAP server (IP tĩnh 10.13.37.50, cổng 5683) với 2 tài nguyên:
+//   coap://10.13.37.50/led   GET -> "0"/"1"; PUT "1" | "0" | "toggle" để điều khiển LED
+//   coap://10.13.37.50/temp  GET -> JSON nhiệt độ/độ ẩm DHT22
+//   coap://10.13.37.50/.well-known/core -> danh sách tài nguyên (thư viện tự trả lời)
+// Thử nghiệm: chạy ví dụ "36. CoAP client" ở một tab khác (cùng mạng WiFi ảo 10.13.37.x).
+// Thư viện: CoAP simple library (#include <coap-simple.h>).
+#include <WiFi.h>
+#include <WiFiUdp.h>
+#include <coap-simple.h>
+#include <DHT.h>
+
+const int LED_PIN = 4;
+IPAddress local_IP(10, 13, 37, 50);
+IPAddress gateway(10, 13, 37, 1);
+IPAddress subnet(255, 255, 255, 0);
+
+WiFiUDP udp;
+Coap coap(udp);
+DHT dht(15, DHT22);
+bool ledState = false;
+
+void callback_led(CoapPacket &packet, IPAddress ip, int port) {
+  char p[packet.payloadlen + 1];
+  memcpy(p, packet.payload, packet.payloadlen);
+  p[packet.payloadlen] = NULL;
+  String message(p);
+
+  if (packet.code == COAP_PUT || packet.code == COAP_POST) {
+    if (message == "1" || message == "on") ledState = true;
+    else if (message == "0" || message == "off") ledState = false;
+    else if (message == "toggle") ledState = !ledState;
+    digitalWrite(LED_PIN, ledState);
+  }
+  Serial.printf("[CoAP] %s /led từ %s:%d  payload=\\"%s\\"  -> LED %s\\n", packet.code == COAP_GET ? "GET" : "PUT",
+                ip.toString().c_str(), port, p, ledState ? "BẬT" : "TẮT");
+  coap.sendResponse(ip, port, packet.messageid, ledState ? "1" : "0");
+}
+
+void callback_temp(CoapPacket &packet, IPAddress ip, int port) {
+  char json[64];
+  snprintf(json, sizeof(json), "{\\"t\\":%.1f,\\"h\\":%.0f}", dht.readTemperature(), dht.readHumidity());
+  Serial.printf("[CoAP] GET /temp từ %s -> %s\\n", ip.toString().c_str(), json);
+  coap.sendResponse(ip, port, packet.messageid, json, strlen(json), COAP_CONTENT, COAP_APPLICATION_JSON, packet.token, packet.tokenlen);
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_PIN, OUTPUT);
+  dht.begin();
+  WiFi.config(local_IP, gateway, subnet);
+  WiFi.begin("ESP32-IoT-GUEST", "");
+  while (WiFi.status() != WL_CONNECTED) { delay(250); Serial.print("."); }
+  Serial.print("\\nWiFi OK, IP: ");
+  Serial.println(WiFi.localIP());
+
+  coap.server(callback_led, "led");
+  coap.server(callback_temp, "temp");
+  coap.start();               // cổng 5683
+  Serial.println("CoAP server đang chạy: coap://10.13.37.50/led, /temp");
+}
+
+void loop() {
+  coap.loop();                // xử lý yêu cầu đến
+  delay(10);
+}
+`,
+    diagram: compose(LED_D4, dhtAt(300, 120)),
+  },
+  {
+    id: 'coap-client', name: '36. CoAP client: GET/PUT tới server', category: 'Giao thức',
+    code: `// CoAP client: nhấn nút -> PUT "toggle" tới coap://10.13.37.50/led (ví dụ "35. CoAP server" ở tab khác),
+// mỗi 5 giây GET /temp. Khi khởi động còn thử GET coap://coap.me/test — server CoAP công cộng trên Internet
+// (cần chạy bằng "node server.js": trình duyệt không gửi được UDP, server sẽ chuyển tiếp gói tin).
+// Phản hồi đến hàm callback_response(): mã 2.05 = Content, 2.04 = Changed, 4.04 = Not Found...
+#include <WiFi.h>
+#include <WiFiUdp.h>
+#include <coap-simple.h>
+
+const int BUTTON_PIN = 15;
+IPAddress serverIP(10, 13, 37, 50);
+
+WiFiUDP udp;
+Coap coap(udp);
+int lastButton = HIGH;
+unsigned long lastGet = 0;
+
+void callback_response(CoapPacket &packet, IPAddress ip, int port) {
+  char p[packet.payloadlen + 1];
+  memcpy(p, packet.payload, packet.payloadlen);
+  p[packet.payloadlen] = NULL;
+  Serial.printf("[CoAP] Phản hồi %d.%02d từ %s (mid %d): %s\\n", packet.code >> 5, packet.code & 0x1F,
+                ip.toString().c_str(), packet.messageid, p);
+  if (ip == serverIP && packet.payloadlen == 1) digitalWrite(LED_BUILTIN, p[0] == '1');   // trạng thái LED bên server
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(LED_BUILTIN, OUTPUT);
+  WiFi.begin("ESP32-IoT-GUEST", "");
+  while (WiFi.status() != WL_CONNECTED) { delay(250); Serial.print("."); }
+  Serial.print("\\nWiFi OK, IP: ");
+  Serial.println(WiFi.localIP());
+
+  coap.response(callback_response);
+  coap.start();
+
+  IPAddress coapMe;
+  if (WiFi.hostByName("coap.me", coapMe)) {
+    Serial.print("coap.me = ");
+    Serial.println(coapMe);
+    coap.get(coapMe, 5683, "test");
+  }
+}
+
+void loop() {
+  int b = digitalRead(BUTTON_PIN);
+  if (b != lastButton) {
+    lastButton = b;
+    if (b == LOW) {
+      int id = coap.put(serverIP, 5683, "led", "toggle");
+      Serial.printf("PUT /led toggle (mid %d)\\n", id);
+    }
+    delay(30);
+  }
+  if (millis() - lastGet > 5000) {
+    lastGet = millis();
+    coap.get(serverIP, 5683, "temp");
+  }
+  coap.loop();                // nhận phản hồi
+  delay(10);
+}
+`,
+    diagram: diagram(BUTTON_D15.parts, BUTTON_D15.conns),
   },
 ];

@@ -18,6 +18,9 @@ const isFloat = (t) => t.k === 'float';
 const isNum = (t) => isInt(t) || isFloat(t);
 const isCharArr = (t) => t.k === 'array' && (t.elem.k === 'char' || (t.elem.k === 'int' && t.elem.bits === 8));
 const isStrLike = (t) => t.k === 'String' || t.k === 'cstr';
+// enum types of the ESP-IDF / library headers, handled as int
+export const INT_TYPES = new Set(['esp_now_send_status_t', 'wifi_interface_t', 'wifi_mode_t', 'COAP_TYPE', 'COAP_METHOD',
+  'COAP_RESPONSE_CODE', 'COAP_CONTENT_TYPE', 'COAP_OPTION_NUMBER']);
 const isDyn = (t) => t.k === 'any' || t.k === 'class';
 
 const ASYNC_FUNCS = new Set(['delay', 'delayMicroseconds', 'yield', 'pulseIn', 'pulseInLong', 'vTaskDelay',
@@ -91,6 +94,7 @@ class Gen {
       else if (JSON_VALUE_TYPES.has(name)) t = T.any;
       else if (['TaskHandle_t', 'SemaphoreHandle_t', 'QueueHandle_t', 'TimerHandle_t', 'hw_timer_t', 'portMUX_TYPE', 'esp_err_t'].includes(name)) t = name === 'esp_err_t' ? T.i32 : T.any;
       else if (['TickType_t', 'BaseType_t', 'UBaseType_t', 'time_t'].includes(name)) t = name === 'BaseType_t' ? T.i32 : T.u32;
+      else if (INT_TYPES.has(name)) t = T.i32;
       else if (this.libs[name]) t = { k: 'class', name, tmpl: pt.tmpl };
       else throw this.err(`'${name}' does not name a type` + (/^[A-Z]/.test(name) ? ` (thư viện/lớp '${name}' chưa được trình giả lập hỗ trợ)` : ''), node);
     } else {
@@ -108,8 +112,25 @@ class Gen {
 
   declType(d, baseType, node) {
     let t = this.resolveType(d.type || baseType, node);
-    for (let i = d.dims.length - 1; i >= 0; i--) t = { k: 'array', elem: t };
+    for (let i = d.dims.length - 1; i >= 0; i--) {
+      const n = d.dims[i] ? this.constInt(d.dims[i]) : null;
+      t = n != null ? { k: 'array', elem: t, len: n } : { k: 'array', elem: t };
+    }
     return t;
+  }
+
+  // value of a constant integer expression (array sizes for sizeof), else null
+  constInt(node) {
+    switch (node.k) {
+      case 'Num': return node.isFloat ? null : Number(node.v);
+      case 'Ident': { const c = this.consts[node.name]; return c && c[1] === 'int' ? c[0] : null; }
+      case 'Binary': {
+        const a = this.constInt(node.l), b = this.constInt(node.r);
+        if (a == null || b == null) return null;
+        return { '+': a + b, '-': a - b, '*': a * b, '/': b ? Math.trunc(a / b) : null }[node.op] ?? null;
+      }
+      default: return null;
+    }
   }
 
   arrKind(elem) {
@@ -125,12 +146,25 @@ class Gen {
     return "'any'";
   }
 
+  packKind(t) {
+    while (t.k === 'array') t = t.elem;
+    switch (t.k) {
+      case 'int': return `'${t.uns ? 'u' : 'i'}${t.bits}'`;
+      case 'char': case 'bool': return "'u8'";
+      case 'float': return t.bits === 32 ? "'f32'" : "'f64'";
+      case 'struct': return `S_${t.name}`;
+      case 'String': return "'str'";
+      default: return "'i32'";
+    }
+  }
+
   sizeOfType(t) {
     switch (t.k) {
       case 'int': return t.bits / 8;
       case 'char': case 'bool': return 1;
       case 'float': return t.bits / 8;
       case 'String': return 16;
+      case 'array': return t.len != null ? t.len * this.sizeOfType(t.elem) : 4;
       case 'struct': {
         const st = this.structs.get(t.name);
         return st ? st.fields.reduce((a, f) => a + this.sizeOfType(f.type), 0) : 4;
@@ -299,7 +333,10 @@ class Gen {
       return `o.${f.name}=this.${f.name};`;
     }).join('');
     const from = st.fields.map((f, i) => `if(a.length>${i})o.${f.name}=a[${i}];`).join('');
-    return `class S_${name}{constructor(){${ctor}}$c(){const o=new S_${name}();${clone}return o;}static $from(a){const o=new S_${name}();${from}return o;}}`;
+    // byte layout for memcpy()/esp_now_send() of the struct ($.pack / $.unpack); a getter, as nested struct
+    // classes may be defined later
+    const layout = st.fields.map((f) => `[${JSON.stringify(f.name)},${this.packKind(f.type)}]`).join(',');
+    return `class S_${name}{constructor(){${ctor}}$c(){const o=new S_${name}();${clone}return o;}static $from(a){const o=new S_${name}();${from}return o;}static get $L(){return [${layout}];}}`;
   }
 
   // Initial value expression for a declarator of type t
@@ -353,6 +390,15 @@ class Gen {
   }
 
   initValue(it, t, scope) {
+    // array member of a struct initializer: a real (typed) array of the declared size
+    if (t.k === 'array' && t.len != null && (it.k === 'InitList' || (it.k === 'Str' && isCharArr(t)))) {
+      const dims = [];
+      for (let a = t; a.k === 'array'; a = a.elem) {
+        if (a.len == null) { dims.length = 0; break; }
+        dims.push({ k: 'Num', v: a.len, line: it.line });
+      }
+      if (dims.length) return this.arrayInit({ init: it, dims }, t, scope, it);
+    }
     if (it.k === 'InitList') {
       if (t.k === 'struct') return this.declInit({ init: it, dims: [] }, t, scope, it);
       if (t.k === 'array') return '[' + it.items.map((x) => this.initValue(x, t.elem, scope)).join(',') + ']';
@@ -673,6 +719,9 @@ class Gen {
       }
       if (isDyn(at) && at.k === 'any') a = `$.jv(${a})`;
       if (isDyn(bt) && bt.k === 'any') b = `$.jv(${b})`;
+      // IPAddress compares by value (valueOf = the 32-bit address)
+      if (at.k === 'class' && at.name === 'IPAddress') a = `(+${a})`;
+      if (bt.k === 'class' && bt.name === 'IPAddress') b = `(+${b})`;
       const jsop = op === '==' ? '==' : op === '!=' ? '!=' : op;
       return [`(${a}${jsop}${b})`, T.bool];
     }

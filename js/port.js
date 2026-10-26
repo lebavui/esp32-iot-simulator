@@ -8,11 +8,13 @@ import { PARTS, defaultAttrs } from './circuit/parts.js';
 import { routeWires, pinExit } from './circuit/route.js';
 import { CONSTS } from './runtime/meta.js';
 
-const ANALOG_PINS = { 'esp32-iot-potentiometer': ['SIG'], 'esp32-iot-photoresistor-sensor': ['AO'] };
+const SPI_PINS = ['SCK', 'MOSI', 'MISO'];
 // calls whose first argument is a GPIO (Servo.attach, DHTesp.setup included)
 const PIN_CALL = /\b(pinMode|digitalWrite|digitalRead|analogRead|analogReadMilliVolts|analogWrite|ledcAttach|ledcAttachPin|ledcAttachChannel|ledcDetach|tone|noTone|touchRead|pulseIn|pulseInLong|digitalPinToInterrupt|detachInterrupt|attach|setup|rgbLedWrite|neopixelWrite)\s*\(\s*([A-Za-z_]\w*|\d+)\s*(?=[,)\[])/g;
 const CTOR_PIN = /\b(?:DHT|OneWire)\s+\w+\s*\(\s*([A-Za-z_]\w*|\d+)\s*(?=[,)])|\bAdafruit_NeoPixel\s+\w+\s*\(\s*[^,()]+,\s*([A-Za-z_]\w*|\d+)\s*(?=[,)])/g;
 const WIRE_BEGIN = /\bWire\s*\.\s*begin\s*\(\s*([A-Za-z_]\w*|\d+)\s*,\s*([A-Za-z_]\w*|\d+)\s*(?=[,)])/g;
+// LoRa.setPins(ss, reset, dio0)
+const SET_PINS = /\bsetPins\s*\(\s*([A-Za-z_]\w*|\d+)\s*(?:,\s*([A-Za-z_]\w*|-?\d+)\s*)?(?:,\s*([A-Za-z_]\w*|-?\d+)\s*)?\)/g;
 
 // A0…/D0…/T0… constants of a board → GPIO
 function pinNames(type) {
@@ -43,6 +45,15 @@ function findPinRefs(code, srcType) {
   for (const r of m.matchAll(PIN_CALL)) add(at(r, 2), r[2], /^analogRead/.test(r[1]));
   for (const r of m.matchAll(CTOR_PIN)) { const i = r[1] ? 1 : 2; add(r.index + r[0].lastIndexOf(r[i]), r[i]); }
   for (const r of m.matchAll(WIRE_BEGIN)) { add(r.index + r[0].indexOf(r[1], r[0].indexOf('(')), r[1]); add(at(r, 2), r[2]); }
+  for (const r of m.matchAll(SET_PINS)) {
+    let from = r[0].indexOf('(');
+    for (const t of [r[1], r[2], r[3]]) {
+      if (t === undefined) continue;
+      const i = r[0].indexOf(t, from);
+      from = i + t.length;
+      if (!t.startsWith('-')) add(r.index + i, t);
+    }
+  }
   // follow identifiers to their #define / initializer values (repeat for chains like #define A B)
   const done = new Set();
   for (let changed = true; changed;) {
@@ -92,7 +103,7 @@ export function portProject(project, target, { route = true } = {}) {
   // ---- what each source GPIO is used for
   const use = new Map(); // gpio → { wired, analog, sda, scl, side: < 0 parts on the left of the board, > 0 on the right }
   const u = (g) => { if (!use.has(g)) use.set(g, {}); return use.get(g); };
-  const srcConsts = src.consts || { SDA: 21, SCL: 22 };
+  const srcConsts = src.consts || { SDA: 21, SCL: 22, SCK: 18, MISO: 19, MOSI: 23 };
   for (const [a, b] of diagram.connections) {
     for (const [mine, other] of [[a, b], [b, a]]) {
       if (!onBoard(mine) || onBoard(other)) continue;
@@ -103,8 +114,13 @@ export function portProject(project, target, { route = true } = {}) {
       const x = u(g);
       x.wired = true;
       if (op) x.side = (x.side || 0) + (op.left + sz(op.type, op.attrs).w / 2 < bp.left + o.w / 2 ? -1 : 1);
-      if (op && ANALOG_PINS[op.type] && ANALOG_PINS[op.type].includes(opin)) x.analog = true;
-      if (op && PARTS[op.type] && PARTS[op.type].i2c && (opin === 'SDA' || opin === 'SCL') && g === srcConsts[opin]) x[opin.toLowerCase()] = true;
+      const def = op && PARTS[op.type];
+      if (def && def.analog && def.analog.includes(opin)) x.analog = true;
+      if (def && def.i2c && (opin === 'SDA' || opin === 'SCL') && g === srcConsts[opin]) x[opin.toLowerCase()] = true;
+      // the board's hardware SPI pins → the new board's SCK/MOSI/MISO
+      if (def && def.spi && SPI_PINS.includes(opin) && g === srcConsts[opin]) x.spi = opin;
+      // the kit's buzzer pin (A3/D3 of the XIAO expansion board) on every board
+      if (def && def.kitPin === opin && src.buzzer === g) x.buzzer = true;
     }
   }
   const refs = findPinRefs(code, srcType);
@@ -121,12 +137,17 @@ export function portProject(project, target, { route = true } = {}) {
   const map = new Map();
   const taken = new Set();
   const usesI2C = [...use.values()].some((x) => x.sda || x.scl);
-  const tc = tgt.consts || { SDA: 21, SCL: 22 };
-  const reserved = new Set([tgt.led && tgt.led.gpio, tgt.boot && tgt.boot.gpio, ...(usesI2C ? [tc.SDA, tc.SCL] : [])].filter((g) => g != null));
+  const usesSPI = [...use.values()].some((x) => x.spi);
+  const usesBuzzer = tgt.buzzer != null && [...use.values()].some((x) => x.buzzer);
+  const tc = tgt.consts || { SDA: 21, SCL: 22, SCK: 18, MISO: 19, MOSI: 23 };
+  const reserved = new Set([tgt.led && tgt.led.gpio, tgt.boot && tgt.boot.gpio, ...(usesI2C ? [tc.SDA, tc.SCL] : []),
+    ...(usesSPI ? SPI_PINS.map((n) => tc[n]) : []), ...(usesBuzzer ? [tgt.buzzer] : [])].filter((g) => g != null));
   const give = (g, t) => { map.set(g, t); taken.add(t); };
   for (const [g, x] of use) {
     if (x.sda) give(g, tc.SDA);
     else if (x.scl) give(g, tc.SCL);
+    else if (x.spi) give(g, tc[x.spi]);
+    else if (x.buzzer && usesBuzzer) give(g, tgt.buzzer);
   }
   let needButton = false;
   if (bootUsed) {
@@ -163,7 +184,7 @@ export function portProject(project, target, { route = true } = {}) {
     for (const side of ['left', 'right']) {
       const gs = [...map.keys()].filter((g) => {
         const x = use.get(g);
-        return x && x.wired && !x.sda && !x.scl && !!x.analog === kind && tgt[side].includes(pinOf(tgt, map.get(g)));
+        return x && x.wired && !x.sda && !x.scl && !x.spi && !x.buzzer && !!x.analog === kind && tgt[side].includes(pinOf(tgt, map.get(g)));
       });
       const ts = gs.map((g) => map.get(g)).sort((a, b) => pinY(target, pinOf(tgt, a)) - pinY(target, pinOf(tgt, b)));
       gs.sort((a, b) => pinY(srcType, pinOf(src, a)) - pinY(srcType, pinOf(src, b)));

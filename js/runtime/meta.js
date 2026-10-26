@@ -41,6 +41,10 @@ export const FUNCS = {
   configTime: 'void', configTzTime: 'void', getLocalTime: 'bool', time: 'long', strftime: 'u32',
   esp_restart: 'void', esp_get_free_heap_size: 'u32', esp_timer_get_time: 'i64',
   rgbLedWrite: 'void', neopixelWrite: 'void', isnan: 'bool', isinf: 'bool', isfinite: 'bool',
+  esp_now_init: 'int', esp_now_deinit: 'int', esp_now_register_recv_cb: 'int', esp_now_register_send_cb: 'int',
+  esp_now_unregister_recv_cb: 'int', esp_now_unregister_send_cb: 'int', esp_now_add_peer: 'int', esp_now_mod_peer: 'int',
+  esp_now_del_peer: 'int', esp_now_is_peer_exist: 'bool', esp_now_send: 'int', esp_err_to_name: 'cstr',
+  esp_wifi_get_mac: 'int', esp_read_mac: 'int',
 };
 
 // name -> [value, type]
@@ -94,12 +98,35 @@ export const CONSTS = {
   LONG_MAX: [2147483647, 'long'], ULONG_MAX: [4294967295, 'u32'], FLT_MAX: [3.4028234663852886e38, 'float'],
   NAN: [NaN, 'float'], INFINITY: [Infinity, 'float'],
   RGB_BUILTIN: [48, 'int'], RGB_BRIGHTNESS: [64, 'int'],
+  // esp_now.h / esp_err.h
+  ESP_OK: [0, 'int'], ESP_FAIL: [-1, 'int'], ESP_NOW_SEND_SUCCESS: [0, 'int'], ESP_NOW_SEND_FAIL: [1, 'int'],
+  ESP_NOW_ETH_ALEN: [6, 'int'], ESP_NOW_MAX_DATA_LEN: [250, 'int'], ESP_NOW_KEY_LEN: [16, 'int'],
+  WIFI_IF_STA: [0, 'int'], WIFI_IF_AP: [1, 'int'], ESP_MAC_WIFI_STA: [0, 'int'],
+  ESP_ERR_WIFI_NOT_INIT: [0x3001, 'int'], ESP_ERR_ESPNOW_NOT_INIT: [0x3065, 'int'], ESP_ERR_ESPNOW_ARG: [0x3066, 'int'],
+  ESP_ERR_ESPNOW_NO_MEM: [0x3067, 'int'], ESP_ERR_ESPNOW_FULL: [0x3068, 'int'], ESP_ERR_ESPNOW_NOT_FOUND: [0x3069, 'int'],
+  ESP_ERR_ESPNOW_INTERNAL: [0x306a, 'int'], ESP_ERR_ESPNOW_EXIST: [0x306b, 'int'], ESP_ERR_ESPNOW_IF: [0x306c, 'int'],
+  // coap-simple.h (including the library's own spellings COAP_NOT_FOUNT, COAP_METHOD_NOT_ALLOWD, …)
+  COAP_DEFAULT_PORT: [5683, 'int'], COAP_CON: [0, 'int'], COAP_NONCON: [1, 'int'], COAP_ACK: [2, 'int'], COAP_RESET: [3, 'int'],
+  COAP_GET: [1, 'int'], COAP_POST: [2, 'int'], COAP_PUT: [3, 'int'], COAP_DELETE: [4, 'int'],
+  COAP_CREATED: [65, 'int'], COAP_DELETED: [66, 'int'], COAP_VALID: [67, 'int'], COAP_CHANGED: [68, 'int'], COAP_CONTENT: [69, 'int'],
+  COAP_BAD_REQUEST: [128, 'int'], COAP_UNAUTHORIZED: [129, 'int'], COAP_BAD_OPTION: [130, 'int'], COAP_FORBIDDEN: [131, 'int'],
+  COAP_NOT_FOUND: [132, 'int'], COAP_NOT_FOUNT: [132, 'int'], COAP_METHOD_NOT_ALLOWED: [133, 'int'], COAP_METHOD_NOT_ALLOWD: [133, 'int'],
+  COAP_NOT_ACCEPTABLE: [134, 'int'], COAP_PRECONDITION_FAILED: [140, 'int'], COAP_REQUEST_ENTITY_TOO_LARGE: [141, 'int'],
+  COAP_UNSUPPORTED_CONTENT_FORMAT: [143, 'int'], COAP_INTERNAL_SERVER_ERROR: [160, 'int'], COAP_NOT_IMPLEMENTED: [161, 'int'],
+  COAP_BAD_GATEWAY: [162, 'int'], COAP_SERVICE_UNAVALIABLE: [163, 'int'], COAP_SERVICE_UNAVAILABLE: [163, 'int'],
+  COAP_GATEWAY_TIMEOUT: [164, 'int'], COAP_PROXYING_NOT_SUPPORTED: [165, 'int'],
+  COAP_NONE: [-1, 'int'], COAP_TEXT_PLAIN: [0, 'int'], COAP_APPLICATION_LINK_FORMAT: [40, 'int'], COAP_APPLICATION_XML: [41, 'int'],
+  COAP_APPLICATION_OCTET_STREAM: [42, 'int'], COAP_APPLICATION_EXI: [47, 'int'], COAP_APPLICATION_JSON: [50, 'int'],
+  COAP_APPLICATION_CBOR: [60, 'int'],
+  COAP_IF_MATCH: [1, 'int'], COAP_URI_HOST: [3, 'int'], COAP_E_TAG: [4, 'int'], COAP_IF_NONE_MATCH: [5, 'int'], COAP_OBSERVE: [6, 'int'],
+  COAP_URI_PORT: [7, 'int'], COAP_LOCATION_PATH: [8, 'int'], COAP_URI_PATH: [11, 'int'], COAP_CONTENT_FORMAT: [12, 'int'],
+  COAP_MAX_AGE: [14, 'int'], COAP_URI_QUERY: [15, 'int'], COAP_ACCEPT: [17, 'int'], COAP_LOCATION_QUERY: [20, 'int'],
 };
 
 // Global objects -> library class name
 export const OBJECTS = {
   Serial: 'HardwareSerial', Serial0: 'HardwareSerial', Serial1: 'HardwareSerial', Serial2: 'HardwareSerial',
-  WiFi: 'WiFiClass', Wire: 'TwoWire', ESP: 'EspClass',
+  WiFi: 'WiFiClass', Wire: 'TwoWire', ESP: 'EspClass', SPI: 'SPIClass', LoRa: 'LoRaClass',
 };
 
 // Library type names whose values are plain JSON values rather than objects.

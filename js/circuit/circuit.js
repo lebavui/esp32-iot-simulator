@@ -158,7 +158,21 @@ export class Circuit {
   ensure() {
     if (!this.dirty) return;
     this.dirty = false;
-    this.solve();
+    // parts whose links depend on solved voltages (relay contacts) settle over a few passes
+    for (let pass = 0; pass < 4; pass++) {
+      this.solve();
+      if (!this.settle()) break;
+    }
+    this.afterSolve();
+  }
+
+  settle() {
+    let changed = false;
+    for (const p of this.parts) {
+      const d = PARTS[p.type];
+      if (d.settle && d.settle(p, { V: (pin) => this.V(p, pin), powered: (pins) => this.isPowered(p, pins) })) changed = true;
+    }
+    return changed;
   }
 
   solve() {
@@ -302,16 +316,22 @@ export class Circuit {
       unknown.forEach((n, i) => { V[n] = Math.abs(A[i][i]) < 1e-15 ? null : A[i][M] / A[i][i]; });
     }
     this.netV = V;
-    // 6. shorts + GPIO level changes (interrupts)
+    this.shorts = shorts;
+  }
+
+  // shorts + GPIO level changes (interrupts) of the settled solution
+  afterSolve() {
+    const shorts = this.shorts;
+    const b = this.board();
+    const V = this.netV;
     if (shorts.length && this.running) {
       const sig = shorts.map((s) => s.a + '/' + s.b).join(',');
       if (sig !== this.lastShort && this.onShort) this.onShort(shorts);
       this.lastShort = sig;
     } else this.lastShort = '';
-    this.shorts = shorts;
     if (b && this.running) {
       for (const [name, gp] of Object.entries(BOARDS[b.type].gpio)) {
-        const n = netOf.get(this.key(b, name));
+        const n = this.netOf.get(this.key(b, name));
         const g = this.gpios.get(gp);
         let lvl;
         if (g && g.mode & 2) lvl = g.out ? 1 : 0;

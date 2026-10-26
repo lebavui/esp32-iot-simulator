@@ -3,6 +3,7 @@
 import { fmtFloat, fmtInt, cFormat, strftime, bytesToBin, binToBytes } from './format.js';
 import { LIBS, JsonDocument, JsonSlot, DeserializationError, TmStruct, jsonSafe } from './libs.js';
 import { boardInfo } from '../boards.js';
+import { espNowFuncs, makeMac, radioReset } from './radio.js';
 
 export class StopSignal { constructor() { this.stop = true; } }
 export class TaskExit { constructor() { this.taskExit = true; } }
@@ -10,12 +11,20 @@ export class Panic extends Error {}
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
+// Yield to the event loop. MessageChannel is fast, but a sketch looping without delay() would then keep other
+// sources waiting (messages of other simulators on the BroadcastChannel are starved in Node), so at least every
+// 25 ms the yield goes through a timer instead.
 let macrotask;
 if (typeof MessageChannel !== 'undefined') {
   const ch = new MessageChannel();
   const q = [];
+  let lastTimer = 0;
   ch.port1.onmessage = () => { const f = q.shift(); if (f) f(); };
-  macrotask = () => new Promise((r) => { q.push(r); ch.port2.postMessage(0); });
+  macrotask = () => new Promise((r) => {
+    if (now() - lastTimer > 25) { lastTimer = now(); setTimeout(r, 0); return; }
+    q.push(r);
+    ch.port2.postMessage(0);
+  });
 } else macrotask = () => new Promise((r) => setTimeout(r, 0));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -33,6 +42,7 @@ export class Runtime {
     this.f = this.makeFuncs();
     this.o = {};
     this.warned = new Set();
+    this.mac = makeMac();
   }
 
   // ---------- lifecycle ----------
@@ -55,12 +65,14 @@ export class Runtime {
     this.pwmBits = 8;
     this.wifi = { status: 0, ssid: '', ip: '' };
     this.time = { offset: 0, synced: false, syncAt: 0 };
+    radioReset(this);
     this.warned = new Set();
     this.stopPromise = new Promise((_, rej) => { this.stopReject = rej; });
     this.stopPromise.catch(() => {});
     this.o = {
       Serial: new LIBS.HardwareSerial(this, 0), Serial0: null, Serial1: new LIBS.HardwareSerial(this, 1), Serial2: new LIBS.HardwareSerial(this, 2),
       WiFi: new LIBS.WiFiClass(this), Wire: new LIBS.TwoWire(this), ESP: new LIBS.EspClass(this),
+      SPI: new LIBS.SPIClass(this), LoRa: new LIBS.LoRaClass(this),
     };
     this.o.Serial0 = this.o.Serial;
   }
@@ -311,6 +323,65 @@ export class Runtime {
         if (Array.isArray(a)) return a.map((x) => (x && typeof x === 'object' ? (x.$c ? x.$c() : $.clone(x)) : x));
         return a;
       },
+      // struct ↔ bytes (little-endian, no padding — as sizeof() counts): S_x.$L = [[field, kind | struct class], …]
+      pack(o) {
+        const out = [];
+        const dv = new DataView(new ArrayBuffer(8));
+        const put = (kind, v) => {
+          if (typeof kind === 'function') { walk(v); return; }
+          if (Array.isArray(v) || ArrayBuffer.isView(v)) { for (const x of v) put(kind, x); return; }
+          if (kind === 'str') { R.warnOnce('packstr', 'String trong struct không gửi/sao chép được dạng byte (trên ESP32 chỉ là con trỏ) — hãy dùng mảng char.'); out.push(...new Array(16).fill(0)); return; }
+          const n = Number(v) || 0;
+          const size = { i8: 1, u8: 1, i16: 2, u16: 2, i32: 4, u32: 4, f32: 4, f64: 8, i64: 8, u64: 8 }[kind] || 4;
+          if (kind === 'f32') dv.setFloat32(0, n, true);
+          else if (kind === 'f64') dv.setFloat64(0, n, true);
+          else if (size === 8) dv.setBigInt64(0, BigInt(Math.trunc(n)), true);
+          else if (size === 4) dv.setInt32(0, n | 0, true);
+          else if (size === 2) dv.setInt16(0, n | 0, true);
+          else dv.setInt8(0, (n | 0) << 24 >> 24);
+          for (let i = 0; i < size; i++) out.push(dv.getUint8(i));
+        };
+        const walk = (s) => { for (const [f, kind] of s.constructor.$L) put(kind, s[f]); };
+        walk(o);
+        return Uint8Array.from(out);
+      },
+      unpack(o, bytes, n) {
+        const end = Math.min(bytes.length, n === undefined ? bytes.length : n);
+        let pos = 0;
+        const dv = new DataView(new ArrayBuffer(8));
+        const get = (kind) => {
+          const size = { i8: 1, u8: 1, i16: 2, u16: 2, i32: 4, u32: 4, f32: 4, f64: 8, i64: 8, u64: 8, str: 16 }[kind] || 4;
+          if (pos + size > end) { pos = end; return undefined; }
+          for (let i = 0; i < size; i++) dv.setUint8(i, bytes[pos++]);
+          switch (kind) {
+            case 'str': return undefined;
+            case 'f32': return dv.getFloat32(0, true);
+            case 'f64': return dv.getFloat64(0, true);
+            case 'i64': case 'u64': return Number(dv.getBigInt64(0, true));
+            case 'u32': return dv.getUint32(0, true);
+            case 'i32': return dv.getInt32(0, true);
+            case 'u16': return dv.getUint16(0, true);
+            case 'i16': return dv.getInt16(0, true);
+            case 'i8': return dv.getInt8(0);
+            default: return dv.getUint8(0);
+          }
+        };
+        const fill = (kind, v, set) => {
+          if (typeof kind === 'function') { if (Array.isArray(v)) v.forEach((x) => walk(x)); else walk(v); return; }
+          if (Array.isArray(v) || ArrayBuffer.isView(v)) {
+            for (let i = 0; i < v.length; i++) {
+              if (Array.isArray(v[i]) || ArrayBuffer.isView(v[i])) fill(kind, v[i]);
+              else { const x = get(kind); if (x !== undefined) v[i] = x; }
+            }
+            return;
+          }
+          const x = get(kind);
+          if (x !== undefined) set(typeof v === 'boolean' ? !!x : x);
+        };
+        const walk = (s) => { for (const [f, kind] of s.constructor.$L) fill(kind, s[f], (x) => { s[f] = x; }); };
+        walk(o);
+        return o;
+      },
       iter(v) {
         if (v == null || v instanceof JsonSlot) return [];
         if (v instanceof JsonDocument) return $.iter(v.root);
@@ -484,6 +555,10 @@ export class Runtime {
       const d = new Date(Date.now() + R.time.offset * 1000);
       return d;
     };
+    // ESP32 GPIOs take at most VDD + 0.3 V (3.6 V): a 5 V sensor output needs a divider / level shifter
+    const overVolt = (pin, v) => {
+      if (v != null && v > 3.6) R.warnOnce('ov' + pin, `GPIO${pin} đang nhận ${v.toFixed(2)} V — vượt mức tối đa 3.6 V của ${R.chip.name}, trên board thật chân này có thể hỏng. Dùng cầu phân áp (vd. 10 kΩ nối tiếp + 20 kΩ xuống GND) hoặc mạch chuyển mức.`);
+    };
     const F = {
       pinMode(pin, mode) {
         if (!R.checkPin(pin, 'pinMode')) return;
@@ -499,6 +574,7 @@ export class Runtime {
       },
       digitalRead(pin) {
         if (!R.checkPin(pin, 'digitalRead')) return 0;
+        if (!(R.sim.gpio(pin).mode & 2)) overVolt(pin, R.sim.readVoltage(pin));
         return R.sim.digitalRead(pin);
       },
       analogRead(pin) {
@@ -511,11 +587,12 @@ export class Runtime {
             : `GPIO${pin} thuộc ADC2 — trên ${name} thật đọc ADC2 có thể thất bại khi WiFi đang bật. Nên dùng chân ADC1 (GPIO${adc1Range}).`);
         }
         const v = R.sim.readVoltage(pin);
+        overVolt(pin, v);
         const max = (1 << R.adcBits) - 1;
         if (v == null) return Math.round(Math.random() * 40);
         return Math.max(0, Math.min(max, Math.round((v / 3.3) * max)));
       },
-      analogReadMilliVolts(pin) { const v = R.sim.readVoltage(pin); return v == null ? 0 : Math.round(Math.min(3.3, v) * 1000); },
+      analogReadMilliVolts(pin) { const v = R.sim.readVoltage(pin); overVolt(pin, v); return v == null ? 0 : Math.round(Math.min(3.3, v) * 1000); },
       analogReadResolution(bits) { R.adcBits = Math.max(9, Math.min(12, bits)); },
       analogSetWidth(bits) { R.adcBits = Math.max(9, Math.min(12, bits)); },
       analogSetAttenuation() {}, analogSetPinAttenuation() {}, analogWriteFrequency() {},
@@ -677,6 +754,9 @@ export class Runtime {
       },
       memset(buf, v, n) { if (ArrayBuffer.isView(buf)) buf.fill(v, 0, n === undefined ? buf.length : Math.min(n, buf.length)); return buf; },
       memcpy(dst, src, n) {
+        // structs are copied as their packed bytes (struct ↔ uint8_t buffer, e.g. ESP-NOW payloads)
+        if (src && src.constructor && src.constructor.$L) src = R.h.pack(src);
+        if (dst && dst.constructor && dst.constructor.$L) { R.h.unpack(dst, typeof src === 'string' ? binToBytes(src) : src, n); return dst; }
         const s = typeof src === 'string' ? binToBytes(src) : src;
         for (let i = 0; i < n && i < dst.length && i < s.length; i++) dst[i] = s[i];
         return dst;
@@ -750,6 +830,7 @@ export class Runtime {
       esp_get_free_heap_size: () => 245000,
       esp_timer_get_time: () => Math.floor((now() - R.t0) * 1000),
       rgbLedWrite() {}, neopixelWrite() {},
+      ...espNowFuncs(R),
     };
     void $;
     return F;

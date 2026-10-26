@@ -59,7 +59,7 @@ export const BOARDS = {
   'esp32-iot-esp32-devkit-v1': {
     label: 'ESP32 DevKit V1', chip: 'esp32', left: ESP32_LEFT, right: ESP32_RIGHT, gpio: ESP32_GPIO,
     power: { 'GND.1': 0, 'GND.2': 0, '3V3': 3.3, VIN: 5 },
-    led: { gpio: 2, activeLow: false }, consts: null, // the defaults in runtime/meta.js are the DevKit's
+    led: { gpio: 2, activeLow: false }, buzzer: 4, consts: null, // the defaults in runtime/meta.js are the DevKit's
     // header GPIOs preferred when a project is moved to this board (port.js): general I/O, then ADC inputs
     prefer: { digital: [4, 5, 13, 14, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33, 15, 12], analog: [34, 35, 32, 33, 36, 39] },
     defines: ['ARDUINO_ESP32_DEV', 'CONFIG_IDF_TARGET_ESP32'],
@@ -67,7 +67,7 @@ export const BOARDS = {
   'board-xiao-esp32-c3': {
     label: 'Seeed XIAO ESP32-C3', chip: 'esp32c3', left: XIAO_LEFT, right: XIAO_RIGHT,
     gpio: seq('D', XIAO_C3_D), power: { GND: 0, '3V3': 3.3, '5V': 5 },
-    led: null, boot: { gpio: 9 }, // no user LED; BOOT button = GPIO9 (D9)
+    led: null, boot: { gpio: 9 }, buzzer: 5, // no user LED; BOOT button = GPIO9 (D9); buzzer on D3 (XIAO expansion board)
     prefer: { digital: [3, 4, 5, 10, 2, 21, 20, 8, 6, 7], analog: [2, 3, 4] },
     consts: { TX: 21, RX: 20, SDA: 6, SCL: 7, SS: 20, MOSI: 10, MISO: 9, SCK: 8, A0: 2, A1: 3, A2: 4, ...seq('D', XIAO_C3_D) },
     defines: ['ARDUINO_XIAO_ESP32C3', 'CONFIG_IDF_TARGET_ESP32C3'],
@@ -75,7 +75,7 @@ export const BOARDS = {
   'board-xiao-esp32-s3': {
     label: 'Seeed XIAO ESP32-S3', chip: 'esp32s3', left: XIAO_LEFT, right: XIAO_RIGHT,
     gpio: seq('D', XIAO_S3_D), power: { GND: 0, '3V3': 3.3, '5V': 5 },
-    led: { gpio: 21, activeLow: true }, // user LED (yellow), not on the header
+    led: { gpio: 21, activeLow: true }, buzzer: 4, // user LED (yellow), not on the header; buzzer on A3/D3 (XIAO expansion board)
     prefer: { digital: [1, 2, 3, 4, 7, 8, 9, 43, 44, 5, 6], analog: [1, 2, 3, 4, 7, 8, 9] },
     consts: {
       LED_BUILTIN: 21, BUILTIN_LED: 21, TX: 43, RX: 44, SDA: 5, SCL: 6, SS: 44, MOSI: 9, MISO: 8, SCK: 7,
@@ -88,7 +88,7 @@ export const BOARDS = {
     label: 'ESP32-C3 SuperMini', chip: 'esp32c3', left: SUPERMINI_LEFT, right: SUPERMINI_RIGHT,
     gpio: Object.fromEntries(SUPERMINI_RIGHT.concat(SUPERMINI_LEFT.slice(3)).map((n) => [n, Number(n)])),
     power: { GND: 0, '3V3': 3.3, '5V': 5 },
-    led: { gpio: 8, activeLow: true }, boot: { gpio: 9 }, // blue LED on GPIO8 (lit when LOW), BOOT = GPIO9
+    led: { gpio: 8, activeLow: true }, boot: { gpio: 9 }, buzzer: 3, // blue LED on GPIO8 (lit when LOW), BOOT = GPIO9; buzzer on A3
     prefer: { digital: [3, 4, 5, 6, 7, 10, 0, 1, 2, 20, 21], analog: [0, 1, 2, 3, 4] },
     consts: { LED_BUILTIN: 8, BUILTIN_LED: 8, TX: 21, RX: 20, SDA: 8, SCL: 9, SS: 7, MOSI: 6, MISO: 5, SCK: 4, ...seq('A', range(0, 5)) },
     defines: ['ARDUINO_NOLOGO_ESP32C3_SUPER_MINI', 'CONFIG_IDF_TARGET_ESP32C3'],

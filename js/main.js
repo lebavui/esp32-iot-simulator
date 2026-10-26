@@ -30,9 +30,9 @@ void loop() {
 const BLANK_DIAGRAM = { version: 1, parts: [{ type: 'esp32-iot-esp32-devkit-v1', id: 'esp', top: 0, left: 0, attrs: {} }], connections: [] };
 
 // ---------------------------------------------------------------- settings
-const settings = Object.assign({ proxy: 'auto', brokers: {}, sound: true, timestamps: false, board: DEFAULT_BOARD }, safeJson(localStorage.getItem(SETTINGS_KEY)) || {});
+const settings = Object.assign({ proxy: 'auto', brokers: {}, sound: true, timestamps: false, board: DEFAULT_BOARD, theme: 'dark' }, safeJson(localStorage.getItem(SETTINGS_KEY)) || {});
 if (!BOARDS[settings.board]) settings.board = DEFAULT_BOARD;
-function saveSettings() { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ proxy: settings.proxy, brokers: settings.brokers, sound: settings.sound, timestamps: settings.timestamps, board: settings.board })); }
+function saveSettings() { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ proxy: settings.proxy, brokers: settings.brokers, sound: settings.sound, timestamps: settings.timestamps, board: settings.board, theme: settings.theme })); }
 function safeJson(s) { try { return JSON.parse(s); } catch { return null; } }
 
 // ---------------------------------------------------------------- code editor
@@ -46,6 +46,23 @@ const cm = CodeMirror.fromTextArea($('codeArea'), {
   },
 });
 const sketchDoc = cm.getDoc();
+
+// ---------------------------------------------------------------- theme: 'dark' | 'light' | 'auto' (follows the OS)
+const lightQuery = window.matchMedia('(prefers-color-scheme: light)');
+function applyTheme() {
+  const t = settings.theme === 'auto' ? (lightQuery.matches ? 'light' : 'dark') : settings.theme === 'light' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = t;
+  cm.setOption('theme', t === 'light' ? 'default' : 'material-darker');
+  $('btnTheme').textContent = t === 'light' ? '🌙' : '☀';
+  $('btnTheme').title = t === 'light' ? 'Chuyển sang giao diện tối' : 'Chuyển sang giao diện sáng';
+}
+lightQuery.addEventListener('change', () => { if (settings.theme === 'auto') applyTheme(); });
+$('btnTheme').onclick = () => {
+  settings.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  saveSettings();
+  applyTheme();
+};
+applyTheme();
 const diagramDoc = CodeMirror.Doc('', 'application/json');
 let activeCodeTab = 'sketch';
 cm.on('cursorActivity', () => { const c = cm.getCursor(); $('cursorPos').textContent = `Dòng ${c.line + 1}, Cột ${c.ch + 1}`; });
@@ -159,6 +176,7 @@ function showProblems(list) {
   clearMarks();
   if (!list.length) { box.hidden = true; return; }
   box.hidden = false;
+  if (layoutState.codeHidden && list.some((p) => p.type === 'error')) setCodeHidden(false);   // errors are shown next to the code
   const errs = list.filter((p) => p.type === 'error').length;
   $('problemsTitle').textContent = errs ? `Lỗi (${errs})` : `Cảnh báo (${list.length})`;
   for (const p of list) {
@@ -255,6 +273,34 @@ for (const t of $('bottomTabs').querySelectorAll('.tab')) {
     if (activeBottom === 'net') { netUnread = 0; $('netBadge').hidden = true; }
   });
 }
+// ---------------------------------------------------------------- hide/show the code pane and the bottom panel
+const LAYOUT_KEY = 'esp32sim.layout';
+const layoutState = Object.assign({ codeHidden: false, bottomCollapsed: false }, safeJson(localStorage.getItem(LAYOUT_KEY)) || {});
+function applyLayout() {
+  $('layout').classList.toggle('code-hidden', layoutState.codeHidden);
+  $('btnToggleCode').classList.toggle('on', !layoutState.codeHidden);
+  $('btnToggleCode').title = (layoutState.codeHidden ? 'Hiện code' : 'Ẩn code') + ' (Ctrl+B)';
+  $('bottom').classList.toggle('collapsed', layoutState.bottomCollapsed);
+  $('simPane').classList.toggle('bottom-collapsed', layoutState.bottomCollapsed);
+  $('btnToggleBottom').textContent = layoutState.bottomCollapsed ? '▴' : '▾';
+  $('btnToggleBottom').title = (layoutState.bottomCollapsed ? 'Mở panel' : 'Thu gọn panel') + ' (Ctrl+J)';
+  try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layoutState)); } catch { /* quota */ }
+  if (!layoutState.codeHidden) requestAnimationFrame(() => cm.refresh());
+}
+function setCodeHidden(v) { layoutState.codeHidden = v; applyLayout(); if (!v) cm.focus(); }
+function setBottomCollapsed(v) {
+  layoutState.bottomCollapsed = v;
+  applyLayout();
+  if (!v) { const out = activeBottom === 'net' ? $('netLog') : activeBottom === 'serial' ? serialOut : null; if (out && $('autoscroll').checked) out.scrollTop = out.scrollHeight; }
+}
+$('btnToggleCode').onclick = () => setCodeHidden(!layoutState.codeHidden);
+$('btnHideCode').onclick = () => setCodeHidden(true);
+$('btnToggleBottom').onclick = () => setBottomCollapsed(!layoutState.bottomCollapsed);
+// a click on a tab of the collapsed panel opens it
+for (const t of $('bottomTabs').querySelectorAll('.tab')) t.addEventListener('click', () => { if (layoutState.bottomCollapsed) setBottomCollapsed(false); });
+$('bottomTabs').addEventListener('dblclick', (e) => { if (!e.target.closest('button, input, label')) setBottomCollapsed(!layoutState.bottomCollapsed); });
+applyLayout();
+
 $('btnClear').onclick = () => {
   if (activeBottom === 'serial') serialOut.innerHTML = '';
   else if (activeBottom === 'net') netLogEl.innerHTML = '';
@@ -482,7 +528,7 @@ function renderInspector(item) {
       input = document.createElement('button');
       input.textContent = a.text;
       input.type = 'button';
-      input.onclick = (e) => { e.preventDefault(); if (!running) { toast('Hãy chạy mô phỏng trước'); return; } triggerMotion(item); needsRender = true; };
+      input.onclick = (e) => { e.preventDefault(); if (!running) { toast('Hãy chạy mô phỏng trước'); return; } if (def.onButton) def.onButton(item); else triggerMotion(item); needsRender = true; };
       f.append(a.label, input);
     } else {
       input = document.createElement('input');
@@ -690,6 +736,8 @@ for (const m of document.querySelectorAll('.modal')) {
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') document.querySelectorAll('.modal').forEach((m) => { m.hidden = true; });
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); }
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'b' || e.key === 'B')) { e.preventDefault(); setCodeHidden(!layoutState.codeHidden); }
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'j' || e.key === 'J')) { e.preventDefault(); setBottomCollapsed(!layoutState.bottomCollapsed); }
 });
 $('btnSettings').onclick = () => {
   $('setProxy').value = settings.proxy;
@@ -697,6 +745,7 @@ $('btnSettings').onclick = () => {
   $('setBrokers').value = Object.entries(map).map(([h, u]) => `${h} = ${u}`).join('\n');
   $('setSound').checked = settings.sound;
   $('setTimestamps').checked = settings.timestamps;
+  $('setTheme').value = settings.theme;
   $('settingsModal').hidden = false;
 };
 $('settingsSave').onclick = () => {
@@ -709,7 +758,9 @@ $('settingsSave').onclick = () => {
   settings.brokers = map;
   settings.sound = $('setSound').checked;
   settings.timestamps = $('setTimestamps').checked;
+  settings.theme = $('setTheme').value;
   saveSettings();
+  applyTheme();
   if (!settings.sound) stopSounds();
   $('settingsModal').hidden = true;
   toast('Đã lưu cài đặt (áp dụng cho lần chạy tiếp theo)');

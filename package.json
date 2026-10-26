@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test": "node tests/compile_examples.mjs && node tests/run_examples.mjs && node tests/t_boards.mjs && node tests/t_port.mjs"
+    "test": "node tests/compile_examples.mjs && node tests/run_examples.mjs && node tests/t_boards.mjs && node tests/t_port.mjs && node tests/t_radio.mjs"
   },
   "license": "MIT"
 }

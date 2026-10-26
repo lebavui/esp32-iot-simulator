@@ -1,32 +1,12 @@
 // Simulated Arduino libraries. Every class is constructed as `new Cls(R, ...ctorArgs)`.
 // `static meta.ret` gives return types to the compiler (so floats print with 2 decimals, etc.).
-import { cFormat, strftime, bytesToBin, binToBytes, binToUtf8, utf8ToBin } from './format.js';
+import { strftime, bytesToBin, binToBytes, binToUtf8, utf8ToBin } from './format.js';
 import { glyph } from '../font5x7.js';
+import { Print } from './print.js';
+import { RADIO_LIBS, lanIp, macBytes, resolveHost } from './radio.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const isPlain = (v) => Array.isArray(v) || (v !== null && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype);
-
-// ---------------------------------------------------------------- Print base
-class Print {
-  constructor(R) { this.R = R; }
-  async $out(s) { /* override */ void s; }
-  async print(v, base) { const s = this.R.h.pfmt(v, base); await this.$out(s); return s.length; }
-  async println(v, base) {
-    const s = (v === undefined ? '' : this.R.h.pfmt(v, base)) + '\r\n';
-    await this.$out(s);
-    return s.length;
-  }
-  async printf(fmt, ...args) { const s = cFormat(fmt, args, (x) => this.R.h.str(x)); await this.$out(s); return s.length; }
-  async write(v, len) {
-    let s;
-    if (typeof v === 'number') s = String.fromCharCode(v & 255);
-    else if (v instanceof Uint8Array) s = bytesToBin(len !== undefined ? v.subarray(0, len) : v);
-    else s = this.R.h.str(v).slice(0, len === undefined ? undefined : len);
-    await this.$out(s);
-    return s.length;
-  }
-}
-Print.meta = { ret: { print: 'u32', println: 'u32', printf: 'u32', write: 'u32' } };
 
 // ---------------------------------------------------------------- Serial
 export class HardwareSerial extends Print {
@@ -134,7 +114,7 @@ export class WiFiClass {
     const id = setTimeout(() => {
       if (R.stopped) return;
       this.st.status = 3;
-      this.st.ip = '10.13.37.' + (2 + Math.floor(Math.random() * 200));
+      this.st.ip = this.$static || lanIp(R.mac);
       R.io.net('wifi', `WiFi đã kết nối (AP ảo "${binToUtf8(ssid)}"), IP ${this.st.ip}`);
       R.io.wifi(true);
     }, 900 + Math.random() * 600);
@@ -152,14 +132,41 @@ export class WiFiClass {
   setSleep() { return true; }
   setTxPower() { return true; }
   onEvent() { return 0; }
-  config() { return true; }
+  // static IP (WiFi.config(ip, gateway, subnet, dns…)): used on the virtual network 10.13.37.0/24
+  config(ip) {
+    const s = ip && ip.o ? ip.toString() : '0.0.0.0';
+    this.$static = s === '0.0.0.0' ? null : s;
+    if (this.$static && !this.$static.startsWith('10.13.37.')) this.R.io.log('info', `WiFi.config(${s}): AP ảo dùng mạng 10.13.37.0/24 — các board trong tab khác chỉ liên lạc được với địa chỉ 10.13.37.x.`);
+    return true;
+  }
+  async hostByName(host, result) {
+    const R = this.R;
+    const h = binToUtf8(R.h.str(host));
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) { result.o = h.split('.').map(Number); return 1; }
+    if (this.st.status !== 3) return 0;
+    try {
+      const ip = await R.wait(resolveHost(R, h));
+      if (!ip) { R.io.net('dns', `✗ Không phân giải được ${h}`, 'err'); return 0; }
+      result.o = ip.split('.').map(Number);
+      R.io.net('dns', `${h} → ${ip}`);
+      return 1;
+    } catch (e) {
+      if (e && e.stop) throw e;
+      R.io.net('dns', `✗ DNS ${h}: ${e.message}`, 'err');
+      return 0;
+    }
+  }
+  broadcastIP() { return new IPAddress(this.R, this.st.status === 3 ? '10.13.37.255' : '255.255.255.255'); }
   setHostname(h) { this.hostname = this.R.h.str(h); return true; }
   getHostname() { return this.hostname; }
   localIP() { return new IPAddress(this.R, this.st.status === 3 ? this.st.ip : '0.0.0.0'); }
   gatewayIP() { return new IPAddress(this.R, this.st.status === 3 ? '10.13.37.1' : '0.0.0.0'); }
   subnetMask() { return new IPAddress(this.R, '255.255.255.0'); }
   dnsIP() { return new IPAddress(this.R, '8.8.8.8'); }
-  macAddress() { return '24:0A:C4:00:01:10'; }
+  macAddress(buf) {
+    if (buf instanceof Uint8Array) { buf.set(macBytes(this.R.mac)); return buf; }
+    return this.R.mac;
+  }
   BSSIDstr() { return '42:13:37:55:AA:01'; }
   SSID(i) { return i === undefined ? this.st.ssid : (this.$scan && this.$scan[i] ? this.$scan[i][0] : ''); }
   RSSI(i) { return i === undefined ? (this.st.status === 3 ? -50 - Math.floor(Math.random() * 6) : 0) : (this.$scan && this.$scan[i] ? this.$scan[i][1] : 0); }
@@ -175,7 +182,7 @@ export class WiFiClass {
   softAPIP() { return new IPAddress(this.R, '192.168.4.1'); }
   softAPConfig() { return true; }
 }
-WiFiClass.meta = { ret: { status: 'int', isConnected: 'bool', localIP: 'class:IPAddress', gatewayIP: 'class:IPAddress', subnetMask: 'class:IPAddress', dnsIP: 'class:IPAddress', softAPIP: 'class:IPAddress', macAddress: 'String', SSID: 'String', RSSI: 'int', scanNetworks: 'int', encryptionType: 'int', channel: 'int', getHostname: 'cstr', BSSIDstr: 'String', begin: 'int', mode: 'bool', getMode: 'int', disconnect: 'bool' } };
+WiFiClass.meta = { ret: { status: 'int', isConnected: 'bool', localIP: 'class:IPAddress', gatewayIP: 'class:IPAddress', subnetMask: 'class:IPAddress', dnsIP: 'class:IPAddress', softAPIP: 'class:IPAddress', macAddress: 'String', SSID: 'String', RSSI: 'int', scanNetworks: 'int', encryptionType: 'int', channel: 'int', getHostname: 'cstr', BSSIDstr: 'String', hostByName: 'int', broadcastIP: 'class:IPAddress', config: 'bool', begin: 'int', mode: 'bool', getMode: 'int', disconnect: 'bool' } };
 
 export class WiFiClient {
   constructor(R) { this.R = R; }
@@ -1022,4 +1029,5 @@ export const LIBS = {
   tm: TmStruct, TwoWire, EspClass, Preferences,
   DHT, DHTesp, TempAndHumidity, Servo, ESP32PWM,
   LiquidCrystal_I2C, Adafruit_SSD1306, Adafruit_NeoPixel,
+  ...RADIO_LIBS,
 };
