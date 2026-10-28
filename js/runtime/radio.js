@@ -18,6 +18,9 @@ export function radioReset(R) {
   R.udpListening = false;
   R.espnow = null;
   R.spiPins = null;
+  R.webServers = null;
+  R.httpPending = null;
+  R.httpListening = false;
 }
 function air(R) {
   if (!R.air) {
@@ -638,7 +641,176 @@ export class Coap {
 }
 Coap.meta = { ret: { start: 'bool', get: 'u16', put: 'u16', post: 'u16', send: 'u16', sendResponse: 'u16', loop: 'bool' } };
 
+// ---------------------------------------------------------------- HTTP on the virtual WiFi network
+// Requests to 10.13.37.x travel over the air as { kind: 'http-req', id, dst, port, method, path, query, headers, body }
+// and are answered by { kind: 'http-resp', id, status, headers, body } (bodies are binary strings). They come from
+// HTTPClient in another runtime, or from a browser tab via sw.js (http://<simulator>/__dev/10.13.37.x/…).
+export const isLanHost = (host) => host.startsWith(LAN_PREFIX);
+function httpListen(R) {
+  if (R.httpListening) return;
+  R.httpListening = true;
+  R.cleanups.push(() => { R.httpListening = false; });
+  airListen(R, 'http-req', (m) => httpDispatch(R, m));
+  airListen(R, 'http-resp', (m) => { const p = R.httpPending && R.httpPending.get(m.id); if (p) p(m); });
+}
+function httpDispatch(R, m) {
+  if (R.wifi.status !== 3 || m.dst !== R.wifi.ip) return;
+  const srv = R.webServers && R.webServers.get(m.port);
+  if (srv) srv.$queue(m);
+}
+// HTTPClient → a board on the virtual network: { status, body, headers }, rejects on timeout
+export function lanHttp(R, { host, port, method, path, query, headers, body }, timeout) {
+  httpListen(R);
+  const id = `${R.mac}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  if (!R.httpPending) R.httpPending = new Map();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { R.httpPending.delete(id); reject(new Error(`không có board nào ở ${host}:${port} trả lời (WebServer chưa chạy?)`)); }, timeout);
+    R.httpPending.set(id, (m) => { clearTimeout(timer); R.httpPending.delete(id); resolve({ status: m.status, body: m.body || '', headers: m.headers || {} }); });
+    const msg = { kind: 'http-req', id, src: R.wifi.ip, dst: host, port, method, path, query, headers, body: body || '' };
+    if (host === R.wifi.ip) httpDispatch(R, msg);
+    else airSend(R, msg);
+  });
+}
+function httpReply(R, req, res) {
+  const m = { kind: 'http-resp', id: req.id, ...res };
+  if (req.src === R.wifi.ip && R.httpPending && R.httpPending.has(req.id)) R.httpPending.get(req.id)(m);
+  else airSend(R, m);
+}
+
+const HTTP_METHODS = { DELETE: 0, GET: 1, HEAD: 2, POST: 3, PUT: 4, OPTIONS: 6, PATCH: 28 };
+export const HTTP_ANY = 255;
+const STATUS_TEXT = { 200: 'OK', 201: 'Created', 204: 'No Content', 301: 'Moved Permanently', 302: 'Found', 303: 'See Other', 304: 'Not Modified', 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found', 405: 'Method Not Allowed', 500: 'Internal Server Error', 503: 'Service Unavailable' };
+// application/x-www-form-urlencoded → [[name, value]] (binary strings)
+function parseForm(s) {
+  const out = [];
+  for (const part of s.split('&')) {
+    if (!part) continue;
+    const i = part.indexOf('=');
+    const dec = (x) => { try { return utf8ToBin(decodeURIComponent(x.replace(/\+/g, ' '))); } catch { return x; } };
+    out.push([dec(i < 0 ? part : part.slice(0, i)), dec(i < 0 ? '' : part.slice(i + 1))]);
+  }
+  return out;
+}
+
+// WebServer.h (arduino-esp32): handlers run inside handleClient(), one request per call
+export class WebServer {
+  constructor(R, port) {
+    this.R = R;
+    this.port = port === undefined ? 80 : port | 0;
+    this.routes = [];
+    this.notFound = null;
+    this.q = [];
+    this.req = null;
+    this.res = null;
+    this.on_ = false;
+    this.collect = [];
+  }
+  on(uri, a, b) {
+    const fn = b === undefined ? a : b;
+    this.routes.push({ uri: binToUtf8(this.R.h.str(uri)), method: b === undefined ? HTTP_ANY : a, fn });
+  }
+  onNotFound(fn) { this.notFound = fn; }
+  collectHeaders() {}
+  enableCORS(on) { this.cors = on !== false; }
+  enableDelay() {}
+  begin(port) {
+    const R = this.R;
+    if (port !== undefined) this.port = port | 0;
+    if (!R.webServers) R.webServers = new Map();
+    R.webServers.set(this.port, this);
+    httpListen(R);
+    this.on_ = true;
+    const announce = () => {
+      const base = typeof location !== 'undefined' ? new URL('__dev/', location.href).href : '/__dev/';
+      R.io.net('http', `WebServer chạy ở http://${R.wifi.ip}${this.port === 80 ? '' : ':' + this.port}/ — mở ${base}${R.wifi.ip}${this.port === 80 ? '' : ':' + this.port}/ trong tab mới để truy cập`);
+    };
+    if (R.wifi.status === 3) announce();
+    else {
+      R.io.net('http', `WebServer (cổng ${this.port}) chờ WiFi kết nối...`);
+      const id = setInterval(() => { if (R.wifi.status === 3) { clearInterval(id); announce(); } }, 200);
+      R.cleanups.push(() => clearInterval(id));
+    }
+  }
+  close() { this.on_ = false; if (this.R.webServers) this.R.webServers.delete(this.port); }
+  stop() { this.close(); }
+  $queue(m) {
+    if (!this.on_) return;
+    if (this.q.length >= 8) { httpReply(this.R, m, { status: 503, headers: { 'content-type': 'text/plain' }, body: 'busy' }); return; }
+    this.q.push(m);
+  }
+  async handleClient() {
+    const R = this.R;
+    const m = this.q.shift();
+    if (!m) return;
+    const method = HTTP_METHODS[m.method] ?? 1;
+    const ctype = (m.headers && (m.headers['content-type'] || '')) || '';
+    const args = parseForm(m.query || '');
+    // form posts become arguments; any other body is the argument "plain" (server.arg("plain"))
+    if (m.body) args.push(...(/x-www-form-urlencoded/i.test(ctype) ? parseForm(m.body) : [['plain', m.body]]));
+    this.req = { ...m, methodCode: method, args, path: binToUtf8(m.path || '/') };
+    this.res = null;
+    this.outHeaders = {};
+    this.collect = null;
+    R.io.net('http', `↓ ${m.method} ${this.req.path}${m.query ? '?' + m.query : ''} từ ${m.src || 'trình duyệt'}${m.body ? '  body: ' + binToUtf8(m.body).slice(0, 200) : ''}`);
+    const route = this.routes.find((r) => r.uri === this.req.path && (r.method === HTTP_ANY || r.method === method));
+    try {
+      if (route) await route.fn();
+      else if (this.notFound) await this.notFound();
+      else this.send(404, 'text/plain', 'Not found: ' + this.req.path);
+    } finally {
+      if (this.collect) this.$finish(this.collect.code, this.collect.type, this.collect.body);
+      if (!this.res) this.$finish(500, 'text/plain', 'handler không gọi server.send()');
+      httpReply(R, m, this.res);
+      R.io.net('http', `↑ ${this.res.status} ${STATUS_TEXT[this.res.status] || ''} (${this.res.body.length} byte)`);
+      this.req = null;
+    }
+  }
+  $finish(code, type, body) {
+    if (this.res) return;
+    const headers = { ...this.outHeaders };
+    if (type) headers['content-type'] = type;
+    if (this.cors) headers['access-control-allow-origin'] = '*';
+    this.res = { status: code, headers, body };
+  }
+  send(code, type, content) {
+    if (!this.req) return;
+    const body = content === undefined ? '' : content instanceof Uint8Array ? bytesToBin(content) : this.R.h.str(content);
+    if (this.collect) { this.collect = { code, type: type === undefined ? 'text/html' : this.R.h.str(type), body }; return; }
+    this.$finish(code, type === undefined ? null : this.R.h.str(type), body);
+  }
+  send_P(code, type, content, len) { this.send(code, type, len === undefined ? content : this.R.h.str(content).slice(0, len)); }
+  // chunked responses: setContentLength(CONTENT_LENGTH_UNKNOWN); send(200, type, ""); sendContent(…)…
+  setContentLength(n) { if (n === -1 && this.req) this.collect = { code: 200, type: 'text/html', body: '' }; }
+  sendContent(s) { if (this.collect) this.collect.body += this.R.h.str(s); }
+  sendContent_P(s) { this.sendContent(s); }
+  sendHeader(name, value) { this.outHeaders[binToUtf8(this.R.h.str(name)).toLowerCase()] = binToUtf8(this.R.h.str(value)); }
+  redirect(url) { this.sendHeader('Location', url); this.send(302, 'text/plain', ''); }
+  $args() { return this.req ? this.req.args : []; }
+  arg(k) {
+    const a = this.$args();
+    if (typeof k === 'number') return a[k] ? a[k][1] : '';
+    const key = this.R.h.str(k);
+    const f = a.find(([n]) => n === key);
+    return f ? f[1] : '';
+  }
+  argName(i) { const a = this.$args()[i]; return a ? a[0] : ''; }
+  args() { return this.$args().length; }
+  hasArg(k) { const key = this.R.h.str(k); return this.$args().some(([n]) => n === key); }
+  header(name) { const h = this.req && this.req.headers; return h ? utf8ToBin(h[binToUtf8(this.R.h.str(name)).toLowerCase()] || '') : ''; }
+  hasHeader(name) { const h = this.req && this.req.headers; return !!(h && h[binToUtf8(this.R.h.str(name)).toLowerCase()] != null); }
+  headers() { return this.req && this.req.headers ? Object.keys(this.req.headers).length : 0; }
+  uri() { return this.req ? utf8ToBin(this.req.path) : ''; }
+  method() { return this.req ? this.req.methodCode : 1; }
+  hostHeader() { return this.header('host'); }
+  authenticate(user, pass) {
+    const a = binToUtf8(this.header('authorization'));
+    return a === 'Basic ' + btoa(this.R.h.str(user) + ':' + this.R.h.str(pass));
+  }
+  requestAuthentication() { this.sendHeader('WWW-Authenticate', 'Basic realm="Login Required"'); this.send(401, 'text/plain', 'Unauthorized'); }
+}
+WebServer.meta = { ret: { arg: 'String', argName: 'String', args: 'int', hasArg: 'bool', header: 'String', hasHeader: 'bool', headers: 'int', uri: 'String', method: 'int', hostHeader: 'String', authenticate: 'bool' } };
+
 export const RADIO_LIBS = {
   SPIClass, SPISettings, LoRaClass, esp_now_peer_info_t, esp_now_recv_info_t, wifi_tx_info_t, esp_now_send_info_t: wifi_tx_info_t, wifi_pkt_rx_ctrl_t,
-  WiFiUDP, Coap, CoapPacket,
+  WiFiUDP, Coap, CoapPacket, WebServer,
 };

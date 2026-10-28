@@ -120,13 +120,16 @@ export class Circuit {
     }
     return 0;
   }
-  findOnPin(types, pinName, gpio) {
+  findOnPin(types, pinName, gpio) { return this.findAllOnPin(types, pinName, gpio)[0] || null; }
+  // every powered part of these types whose pin is on the GPIO's net (e.g. several DS18B20 on one 1-Wire bus)
+  findAllOnPin(types, pinName, gpio) {
     this.ensure();
     const b = this.board();
     const name = this.boardPinOfGpio(gpio);
-    if (!b || !name) return null;
+    if (!b || !name) return [];
     const net = this.net(b, name);
-    return this.parts.find((p) => types.includes(p.type) && this.net(p, pinName) === net && net != null && this.isPowered(p)) || null;
+    if (net == null) return [];
+    return this.parts.filter((p) => types.includes(p.type) && this.net(p, pinName) === net && this.isPowered(p));
   }
   findI2C(kind, addr) {
     this.ensure();

@@ -3,7 +3,7 @@
 import { strftime, bytesToBin, binToBytes, binToUtf8, utf8ToBin } from './format.js';
 import { glyph } from '../font5x7.js';
 import { Print } from './print.js';
-import { RADIO_LIBS, lanIp, macBytes, resolveHost } from './radio.js';
+import { RADIO_LIBS, lanIp, macBytes, resolveHost, isLanHost, lanHttp } from './radio.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const isPlain = (v) => Array.isArray(v) || (v !== null && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype);
@@ -210,6 +210,11 @@ export class WiFiClientSecure extends WiFiClient {}
 // ---------------------------------------------------------------- HTTP
 async function httpRequest(R, method, url, headers, body) {
   const s = R.settings;
+  const u = /^http:\/\/(\d+\.\d+\.\d+\.\d+)(?::(\d+))?([^?#]*)(?:\?([^#]*))?/.exec(url);
+  if (u && isLanHost(u[1])) {
+    const hdrs = Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
+    return lanHttp(R, { host: u[1], port: Number(u[2] || 80), method, path: utf8ToBin(u[3] || '/'), query: u[4] || '', headers: hdrs, body }, 5000);
+  }
   const bodyBytes = body == null ? null : binToBytes(body);
   const tryProxy = s.proxyAvailable && s.proxy !== 'off';
   if (tryProxy) {
@@ -280,7 +285,7 @@ export class HTTPClient {
     } catch (e) {
       if (e && e.stop) throw e;
       this.resp = null;
-      const hint = R.settings.proxyAvailable ? '' : ' — trình duyệt có thể chặn do CORS/mixed-content; hãy chạy "node server.js" để bật proxy HTTP.';
+      const hint = R.settings.proxyAvailable || /^http:\/\/10\.13\.37\./.test(url) ? '' : ' — trình duyệt có thể chặn do CORS/mixed-content; hãy chạy "node server.js" để bật proxy HTTP.';
       R.io.net('http', `✗ ${method} ${url}: ${e.message}${hint}`, 'err');
       return e.message === 'timeout' ? -11 : -1;
     }
@@ -712,6 +717,131 @@ export class DHTesp {
 DHTesp.AUTO_DETECT = 0; DHTesp.DHT11 = 1; DHTesp.DHT22 = 2; DHTesp.AM2302 = 3; DHTesp.RHT03 = 4;
 DHTesp.meta = { ret: { getTemperature: 'float', getHumidity: 'float', getTempAndHumidity: 'class:TempAndHumidity', getStatus: 'int', getStatusString: 'cstr', computeHeatIndex: 'float', toFahrenheit: 'float', toCelsius: 'float', computeDewPoint: 'float', getMinimumSamplingPeriod: 'int' } };
 
+// ---------------------------------------------------------------- 1-Wire: OneWire.h + DallasTemperature.h (DS18B20)
+const DS18B20 = 'esp32-iot-ds18b20';
+export class OneWire {
+  constructor(R, pin) { this.R = R; this.pin = pin; if (pin !== undefined) R.sim.pinMode(pin, 0x01); }
+  begin(pin) { this.pin = pin; this.R.sim.pinMode(pin, 0x01); }
+  // sensors answering on the bus: powered DS18B20s on the pin, and only when DQ idles HIGH (4.7 kΩ pull-up)
+  $devices() {
+    const sim = this.R.sim;
+    const all = sim.findAllOnPin ? sim.findAllOnPin([DS18B20], 'DQ', this.pin) : [sim.findOnPin([DS18B20], 'DQ', this.pin)].filter(Boolean);
+    if (all.length && sim.findAllOnPin && !(sim.readVoltage(this.pin) > 2)) {
+      this.R.warnOnce('ow-pullup' + this.pin, `1-Wire trên GPIO${this.pin}: đường DQ không được kéo lên — cần điện trở 4.7 kΩ nối DQ với VDD (3.3 V), nếu không DS18B20 không trả lời.`);
+      return [];
+    }
+    return all;
+  }
+  reset() { return this.$devices().length ? 1 : 0; }
+  reset_search() { this.$si = 0; }
+  search(addr) {
+    const d = this.$devices();
+    const i = this.$si || 0;
+    if (i >= d.length) return false;
+    this.$si = i + 1;
+    if (addr) addr.set(romCode(d[i]));
+    return true;
+  }
+  select() {}
+  skip() {}
+  write() {}
+  write_bytes() {}
+  read() { return 0xff; }
+  read_bytes() {}
+  depower() {}
+  static crc8(addr, len) {
+    let crc = 0;
+    for (let i = 0; i < len; i++) {
+      let b = addr[i];
+      for (let j = 0; j < 8; j++) { const mix = (crc ^ b) & 1; crc >>= 1; if (mix) crc ^= 0x8c; b >>= 1; }
+    }
+    return crc;
+  }
+}
+OneWire.meta = { ret: { reset: 'u8', search: 'bool', read: 'u8', crc8: 'u8' } };
+// 64-bit ROM code: family 0x28, a serial derived from the part id, CRC
+function romCode(part) {
+  let h = 0x811c9dc5;
+  for (const c of part.id) h = Math.imul(h ^ c.charCodeAt(0), 0x01000193) >>> 0;
+  const rom = Uint8Array.of(0x28, h & 255, (h >> 8) & 255, (h >> 16) & 255, (h >> 24) & 255, 0, 0, 0);
+  rom[7] = OneWire.crc8(rom, 7);
+  return rom;
+}
+
+export class DallasTemperature {
+  constructor(R, wire) { this.R = R; this.wire = wire || null; this.res = 12; this.wait = true; this.latched = new Map(); this.readyAt = 0; }
+  setOneWire(w) { this.wire = w; }
+  begin() { this.$list(); }
+  $list() { return this.wire ? this.wire.$devices() : []; }
+  getDeviceCount() { return this.$list().length; }
+  getDS18Count() { return this.getDeviceCount(); }
+  isParasitePowerMode() { return false; }
+  setResolution(a, b) { const bits = b === undefined ? a : b; this.res = Math.max(9, Math.min(12, bits | 0)); return true; }
+  getResolution() { return this.res; }
+  setWaitForConversion(w) { this.wait = !!w; }
+  getWaitForConversion() { return this.wait; }
+  // conversion time from the datasheet: 93.75 ms at 9 bit … 750 ms at 12 bit
+  $convMs() { return 750 / (1 << (12 - this.res)); }
+  async requestTemperatures() {
+    const step = 0.0625 * (1 << (12 - this.res));
+    this.latched = new Map(this.$list().map((p) => [p.id, Math.round(Math.max(-55, Math.min(125, Number(p.attrs.temperature) || 0)) / step) * step]));
+    this.readyAt = this.R.millis() + this.$convMs();
+    if (this.wait) await this.R.delay(this.$convMs());
+    return true;
+  }
+  async requestTemperaturesByIndex() { return this.requestTemperatures(); }
+  async requestTemperaturesByAddress() { return this.requestTemperatures(); }
+  isConversionComplete() { return this.R.millis() >= this.readyAt; }
+  millisToWaitForConversion() { return this.$convMs(); }
+  $temp(part) {
+    if (!part || !this.latched.has(part.id)) return -127;
+    // read before the conversion ended: the scratchpad still holds the power-on value 85 °C
+    return this.R.millis() < this.readyAt ? 85 : this.latched.get(part.id);
+  }
+  getTempCByIndex(i) { return this.$temp(this.$list()[i]); }
+  getTempFByIndex(i) { const c = this.getTempCByIndex(i); return c === -127 ? -196.6 : c * 1.8 + 32; }
+  getAddress(addr, i) { const p = this.$list()[i]; if (!p || !addr) return false; addr.set(romCode(p)); return true; }
+  $byAddr(addr) { return this.$list().find((p) => romCode(p).every((b, k) => b === addr[k])); }
+  isConnected(addr) { return !!this.$byAddr(addr); }
+  getTempC(addr) { return this.$temp(this.$byAddr(addr)); }
+  getTempF(addr) { const c = this.getTempC(addr); return c === -127 ? -196.6 : c * 1.8 + 32; }
+  validAddress(addr) { return OneWire.crc8(addr, 7) === addr[7]; }
+  validFamily(addr) { return addr[0] === 0x28 || addr[0] === 0x10 || addr[0] === 0x22; }
+  static toFahrenheit(c) { return c * 1.8 + 32; }
+  static toCelsius(f) { return (f - 32) / 1.8; }
+}
+DallasTemperature.meta = { ret: { getDeviceCount: 'u8', getDS18Count: 'u8', isParasitePowerMode: 'bool', setResolution: 'bool', getResolution: 'u8', getWaitForConversion: 'bool', requestTemperatures: 'bool', isConversionComplete: 'bool', millisToWaitForConversion: 'u16', getTempCByIndex: 'float', getTempFByIndex: 'float', getAddress: 'bool', isConnected: 'bool', getTempC: 'float', getTempF: 'float', validAddress: 'bool', validFamily: 'bool', toFahrenheit: 'float', toCelsius: 'float' } };
+
+// ---------------------------------------------------------------- AHT10 / AHT20 (Adafruit_AHTX0.h)
+export class sensors_event_t {
+  constructor() { this.version = 1; this.sensor_id = 0; this.type = 0; this.timestamp = 0; this.temperature = 0; this.relative_humidity = 0; }
+}
+sensors_event_t.meta = { fields: { version: 'int', sensor_id: 'int', type: 'int', timestamp: 'u32', temperature: 'float', relative_humidity: 'float' } };
+
+export class Adafruit_AHTX0 {
+  constructor(R) { this.R = R; this.addr = 0x38; this.part = null; }
+  begin(wire, id, addr) {
+    if (addr !== undefined) this.addr = addr;
+    this.part = this.R.sim.findI2C('aht', this.addr);
+    if (!this.part) this.R.warnOnce('aht' + this.addr, `AHT10/AHT20 địa chỉ 0x${this.addr.toString(16).toUpperCase()} không tìm thấy (kiểm tra dây SDA→GPIO${this.R.i2c.sda}, SCL→GPIO${this.R.i2c.scl}, VIN, GND).`);
+    return !!this.part;
+  }
+  getStatus() { return this.part ? 0x18 : 0xff; }
+  // one measurement: trigger, ~80 ms conversion, 20-bit humidity/temperature
+  async getEvent(hum, temp) {
+    const p = this.R.sim.findI2C('aht', this.addr);
+    if (!p) return false;
+    await this.R.delay(80);
+    const t = Math.round(((Number(p.attrs.temperature) + 50) / 200) * 1048576) / 1048576 * 200 - 50;
+    const h = Math.round((Math.max(0, Math.min(100, Number(p.attrs.humidity))) / 100) * 1048576) / 1048576 * 100;
+    const ts = this.R.millis();
+    if (hum) Object.assign(hum, { type: 12, timestamp: ts, relative_humidity: h });
+    if (temp) Object.assign(temp, { type: 13, timestamp: ts, temperature: t });
+    return true;
+  }
+}
+Adafruit_AHTX0.meta = { ret: { begin: 'bool', getStatus: 'u8', getEvent: 'bool' } };
+
 export class Servo {
   constructor(R) { this.R = R; this.pin = -1; this.angle = 90; this.min = 544; this.max = 2400; }
   attach(pin, min, max) {
@@ -1027,7 +1157,7 @@ export const LIBS = {
   HardwareSerial, WiFiClass, IPAddress, WiFiClient, WiFiClientSecure, HTTPClient, PubSubClient,
   JsonDocument, StaticJsonDocument, DynamicJsonDocument, DeserializationError,
   tm: TmStruct, TwoWire, EspClass, Preferences,
-  DHT, DHTesp, TempAndHumidity, Servo, ESP32PWM,
+  DHT, DHTesp, TempAndHumidity, Servo, ESP32PWM, OneWire, DallasTemperature, Adafruit_AHTX0, sensors_event_t,
   LiquidCrystal_I2C, Adafruit_SSD1306, Adafruit_NeoPixel,
   ...RADIO_LIBS,
 };

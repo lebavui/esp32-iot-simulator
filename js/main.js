@@ -255,7 +255,10 @@ function netLog(kind, msg, level) {
   d.className = 'log-line' + (level === 'err' ? ' err' : msg.startsWith('↓') || msg.startsWith('←') ? ' in' : msg.startsWith('↑') || msg.startsWith('→') ? ' out' : '');
   const t = runtime ? (runtime.millis() / 1000).toFixed(2) + 's' : '';
   d.innerHTML = `<span class="t">${t}</span><span class="k">${kind.toUpperCase()}</span>`;
-  d.append(document.createTextNode(msg));
+  // links to a board's web page (WebServer, served through sw.js) open in a new tab
+  for (const [i, part] of msg.split(/(https?:\/\/\S+\/__dev\/\S+)/).entries()) {
+    if (i % 2) { const a = document.createElement('a'); a.href = part; a.target = '_blank'; a.rel = 'noopener'; a.textContent = part; d.append(a); } else d.append(document.createTextNode(part));
+  }
   netLogEl.append(d);
   while (netLogEl.childNodes.length > 1500) netLogEl.removeChild(netLogEl.firstChild);
   if ($('autoscroll').checked) netLogEl.scrollTop = netLogEl.scrollHeight;
@@ -278,7 +281,7 @@ const LAYOUT_KEY = 'esp32sim.layout';
 const layoutState = Object.assign({ codeHidden: false, bottomCollapsed: false }, safeJson(localStorage.getItem(LAYOUT_KEY)) || {});
 function applyLayout() {
   $('layout').classList.toggle('code-hidden', layoutState.codeHidden);
-  $('btnToggleCode').classList.toggle('on', !layoutState.codeHidden);
+  $('btnToggleCode').textContent = layoutState.codeHidden ? '›' : '‹';
   $('btnToggleCode').title = (layoutState.codeHidden ? 'Hiện code' : 'Ẩn code') + ' (Ctrl+B)';
   $('bottom').classList.toggle('collapsed', layoutState.bottomCollapsed);
   $('simPane').classList.toggle('bottom-collapsed', layoutState.bottomCollapsed);
@@ -294,7 +297,8 @@ function setBottomCollapsed(v) {
   if (!v) { const out = activeBottom === 'net' ? $('netLog') : activeBottom === 'serial' ? serialOut : null; if (out && $('autoscroll').checked) out.scrollTop = out.scrollHeight; }
 }
 $('btnToggleCode').onclick = () => setCodeHidden(!layoutState.codeHidden);
-$('btnHideCode').onclick = () => setCodeHidden(true);
+// the buttons sit on the splitters: a press on them must not start a drag
+for (const b of [$('btnToggleCode'), $('btnToggleBottom')]) b.addEventListener('pointerdown', (e) => e.stopPropagation());
 $('btnToggleBottom').onclick = () => setBottomCollapsed(!layoutState.bottomCollapsed);
 // a click on a tab of the collapsed panel opens it
 for (const t of $('bottomTabs').querySelectorAll('.tab')) t.addEventListener('click', () => { if (layoutState.bottomCollapsed) setBottomCollapsed(false); });
@@ -647,6 +651,7 @@ boardSel.onchange = () => {
 const exSel = $('exampleSelect');
 const groups = new Map();   // one group per category, in order of first appearance
 for (const ex of EXAMPLES) {
+  if (ex.hidden) continue;
   if (!groups.has(ex.category)) { const g = document.createElement('optgroup'); g.label = ex.category; exSel.append(g); groups.set(ex.category, g); }
   const o = document.createElement('option');
   o.value = ex.id;
@@ -777,8 +782,9 @@ function dragSplit(gutter, onMove) {
     gutter.addEventListener('pointerup', up);
   });
 }
-dragSplit($('gutterV'), (e) => { $('codePane').style.width = Math.max(240, Math.min(window.innerWidth - 320, e.clientX)) + 'px'; });
+dragSplit($('gutterV'), (e) => { if (layoutState.codeHidden || matchMedia('(max-width: 820px)').matches) return; $('codePane').style.width = Math.max(240, Math.min(window.innerWidth - 320, e.clientX)) + 'px'; });
 dragSplit($('gutterH'), (e) => {
+  if (layoutState.bottomCollapsed) return;
   const r = $('simPane').getBoundingClientRect();
   $('bottom').style.height = Math.max(70, Math.min(r.height - 160, r.bottom - e.clientY)) + 'px';
 });
@@ -802,6 +808,8 @@ const mqttPanel = new MqttPanel({
 });
 
 // ---------------------------------------------------------------- startup
+// sw.js serves the web pages of simulated boards (WebServer) at /__dev/10.13.37.x/
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 (async () => {
   detectProxy();
   const shared = await loadFromHash();

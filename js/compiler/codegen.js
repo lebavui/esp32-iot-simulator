@@ -24,7 +24,8 @@ export const INT_TYPES = new Set(['esp_now_send_status_t', 'wifi_interface_t', '
 const isDyn = (t) => t.k === 'any' || t.k === 'class';
 
 const ASYNC_FUNCS = new Set(['delay', 'delayMicroseconds', 'yield', 'pulseIn', 'pulseInLong', 'vTaskDelay',
-  'taskYIELD', 'serializeJson', 'serializeJsonPretty', 'getLocalTime', 'esp_restart', 'vTaskDelete']);
+  'taskYIELD', 'serializeJson', 'serializeJsonPretty', 'getLocalTime', 'esp_restart', 'vTaskDelete',
+  'xQueueSend', 'xQueueSendToBack', 'xQueueSendToFront', 'xQueueReceive', 'xQueuePeek', 'xSemaphoreTake', 'xSemaphoreTakeRecursive']);
 const PRINT_METHODS = new Set(['print', 'println']);
 const YIELD = 'if(++$.c>4096)await $.y();';
 

@@ -559,6 +559,28 @@ export class Runtime {
     const overVolt = (pin, v) => {
       if (v != null && v > 3.6) R.warnOnce('ov' + pin, `GPIO${pin} đang nhận ${v.toFixed(2)} V — vượt mức tối đa 3.6 V của ${R.chip.name}, trên board thật chân này có thể hỏng. Dùng cầu phân áp (vd. 10 kΩ nối tiếp + 20 kΩ xuống GND) hoặc mạch chuyển mức.`);
     };
+    // FreeRTOS queue items: the value behind &x (ref), a struct / array copy, or the value itself
+    const qcopy = (p) => {
+      if (p && p.$c) return p.$c();
+      if (ArrayBuffer.isView(p)) return p.slice();
+      if (p && typeof p === 'object' && 'v' in p) return p.v;
+      return p;
+    };
+    const qstore = (buf, v) => {
+      if (buf == null) return;
+      if (buf.$c) Object.assign(buf, v && v.$c ? v.$c() : v);
+      else if (ArrayBuffer.isView(buf)) buf.set(ArrayBuffer.isView(v) ? v.subarray(0, buf.length) : [v]);
+      else if (typeof buf === 'object' && 'v' in buf) buf.v = v;
+    };
+    // block until cond() holds or `ticks` ms (portMAX_DELAY: forever) have passed
+    const qwait = async (cond, ticks) => {
+      const end = ticks === 0xffffffff ? Infinity : R.millis() + (Number(ticks) || 0);
+      while (!cond()) {
+        if (R.millis() >= end) return false;
+        await R.delay(1);
+      }
+      return true;
+    };
     const F = {
       pinMode(pin, mode) {
         if (!R.checkPin(pin, 'pinMode')) return;
@@ -779,6 +801,48 @@ export class Runtime {
       uxTaskGetStackHighWaterMark: () => 1024,
       xTaskGetTickCount: () => R.millis() >>> 0,
       async taskYIELD() { await R.h.y(true); },
+      // queues copy the item (by value, like xQueueSend's memcpy of itemSize bytes); semaphores are counters
+      xQueueCreate: (len) => ({ items: [], len: Math.max(1, len | 0) }),
+      async xQueueSend(q, item, ticks) { return F.$qput(q, item, ticks, false); },
+      async xQueueSendToBack(q, item, ticks) { return F.$qput(q, item, ticks, false); },
+      async xQueueSendToFront(q, item, ticks) { return F.$qput(q, item, ticks, true); },
+      xQueueSendFromISR(q, item) { if (!q || q.items.length >= q.len) return 0; q.items.push(qcopy(item)); return 1; },
+      xQueueOverwrite(q, item) { q.items = [qcopy(item)]; return 1; },
+      async xQueueReceive(q, buf, ticks) { return F.$qget(q, buf, ticks, true); },
+      async xQueuePeek(q, buf, ticks) { return F.$qget(q, buf, ticks, false); },
+      xQueueReceiveFromISR(q, buf) { if (!q || !q.items.length) return 0; qstore(buf, q.items.shift()); return 1; },
+      uxQueueMessagesWaiting: (q) => (q ? q.items.length : 0),
+      uxQueueSpacesAvailable: (q) => (q ? q.len - q.items.length : 0),
+      xQueueReset(q) { if (q) q.items = []; return 1; },
+      vQueueDelete() {},
+      async $qput(q, item, ticks, front) {
+        if (!q) throw new Panic('LoadProhibited');
+        if (!(await qwait(() => q.items.length < q.len, ticks))) return 0;
+        q.items[front ? 'unshift' : 'push'](qcopy(item));
+        return 1;
+      },
+      async $qget(q, buf, ticks, take) {
+        if (!q) throw new Panic('LoadProhibited');
+        if (!(await qwait(() => q.items.length > 0, ticks))) return 0;
+        qstore(buf, take ? q.items.shift() : q.items[0]);
+        return 1;
+      },
+      xSemaphoreCreateMutex: () => ({ count: 1, max: 1 }),
+      xSemaphoreCreateRecursiveMutex: () => ({ count: 1, max: 1 }),
+      xSemaphoreCreateBinary: () => ({ count: 0, max: 1 }),
+      xSemaphoreCreateCounting: (max, init) => ({ count: init | 0, max: max | 0 }),
+      async xSemaphoreTake(s, ticks) {
+        if (!s) throw new Panic('LoadProhibited');
+        if (!(await qwait(() => s.count > 0, ticks))) return 0;
+        s.count--;
+        return 1;
+      },
+      xSemaphoreTakeRecursive(s, ticks) { return F.xSemaphoreTake(s, ticks); },
+      xSemaphoreGive(s) { if (!s || s.count >= s.max) return 0; s.count++; return 1; },
+      xSemaphoreGiveRecursive(s) { return F.xSemaphoreGive(s); },
+      xSemaphoreGiveFromISR(s) { return F.xSemaphoreGive(s); },
+      uxSemaphoreGetCount: (s) => (s ? s.count : 0),
+      vSemaphoreDelete() {},
       async serializeJson(doc, out, size) {
         const s = R.h.serJ(doc, false);
         if (out instanceof Uint8Array) { writeBuf(out, s, size); return s.length; }

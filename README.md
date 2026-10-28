@@ -34,7 +34,8 @@ ADC1/ADC2, chân chỉ-vào của ESP32, ADC2 của ESP32-C3 không dùng đư�
 (hoặc mở ví dụ khi đang chọn board khác) sẽ tự chuyển dây nối và số chân trong code sang board đó.
 
 **Linh kiện**: LED, LED RGB, điện trở, nút nhấn, công tắc gạt,
-biến trở, buzzer, DHT22/DHT11, HC-SR04, PIR, các module cảm biến có chân AO/DO (bộ so sánh LM393): ánh sáng LDR,
+biến trở, buzzer, DHT22/DHT11, DS18B20 (1-Wire, cần điện trở kéo lên 4,7 kΩ), AHT10/AHT20 (I2C), HC-SR04, PIR,
+các module cảm biến có chân AO/DO (bộ so sánh LM393): ánh sáng LDR, ánh sáng photodiode,
 lửa hồng ngoại, khí gas MQ-2 (đường đặc tuyến LPG theo datasheet), mưa, độ ẩm đất; cảm biến mực nước, module relay 1 kênh
 (kích HIGH/LOW, tiếp điểm COM/NO/NC), bóng đèn, servo, LED 7 đoạn, LCD 16x2/20x4 I2C, OLED SSD1306 128x64, dải NeoPixel,
 module LoRa SX1278 (Ra-02, SPI).
@@ -47,7 +48,8 @@ cầu phân áp) đều có cảnh báo như ESP32 thật.
 
 **Thư viện**: Arduino core, `Serial`, `WiFi.h`, `HTTPClient.h`, `PubSubClient.h` (MQTT), `ArduinoJson.h` (v6 & v7),
 `LiquidCrystal_I2C`, `Adafruit_SSD1306`/`Adafruit_GFX`, `Adafruit_NeoPixel`, `DHT.h`, `DHTesp.h`, `ESP32Servo.h`,
-`Wire.h`, `Preferences.h`, `time.h` (NTP), FreeRTOS (`xTaskCreate`, `vTaskDelay`…), LEDC v2 & v3,
+`OneWire.h` + `DallasTemperature.h`, `Adafruit_AHTX0.h`, `WebServer.h`, `Wire.h`, `Preferences.h`, `time.h` (NTP),
+FreeRTOS (`xTaskCreate`, `vTaskDelay`, hàng đợi `xQueue…`, semaphore/mutex `xSemaphore…`), LEDC v2 & v3,
 `LoRa.h` (Sandeep Mistry), `esp_now.h`, `WiFiUdp.h`, `coap-simple.h` (CoAP simple library).
 
 **Mạng**:
@@ -60,10 +62,13 @@ cầu phân áp) đều có cảnh báo như ESP32 thật.
   trong mạng WiFi ảo `10.13.37.0/24` (IP động .100–.249 suy từ MAC, IP tĩnh bằng `WiFi.config`). Module LoRa có nút
   "Nhận gói tin thử" để thử một tab.
 - UDP/CoAP tới địa chỉ Internet đi qua `server.js` (ví dụ `coap://coap.me/test`).
+- **Web server trên board** (`WebServer.h`): board khác gọi tới bằng `HTTPClient` (`http://10.13.37.x/...`), còn trình duyệt
+  mở trang của board tại `http://<trình giả lập>/__dev/10.13.37.x/` (link hiện trong tab Nhật ký mạng) — service worker
+  `sw.js` chuyển yêu cầu qua không gian sóng ảo tới tab đang chạy board đó.
 
 **Giao diện**: trình soạn thảo code (CodeMirror) + tab `diagram.json` sửa trực tiếp, canvas kéo-thả có zoom/pan,
 nối dây có điểm gấp và đổi màu (dây tự đi vuông góc vòng qua linh kiện, đi lại khi di chuyển linh kiện), bảng thuộc tính (thanh trượt nhiệt độ, khoảng cách, độ sáng… thay đổi khi đang chạy),
-Serial Monitor hai chiều, giao diện tối/sáng (nút ☀/🌙 hoặc theo hệ điều hành), ẩn/hiện khung code (Ctrl+B) và panel dưới (Ctrl+J), 36 ví dụ mẫu, tự lưu vào trình duyệt, lưu/mở file `.json`/`.ino`, chia sẻ dự án qua link.
+Serial Monitor hai chiều, giao diện tối/sáng (nút ☀/🌙 hoặc theo hệ điều hành), ẩn/hiện khung code (Ctrl+B) và panel dưới (Ctrl+J), 30 ví dụ mẫu theo chủ đề (vào ra cơ bản, cảm biến số/tương tự/1-Wire/I2C, kết nối, FreeRTOS, ESP-NOW/LoRa), tự lưu vào trình duyệt, lưu/mở file `.json`/`.ino`, chia sẻ dự án qua link.
 
 ## Cấu trúc mã nguồn
 
@@ -93,7 +98,7 @@ và khai báo kiểu trả về trong `meta.ret` để trình biên dịch đị
 ```bash
 npm test                               # biên dịch + chạy toàn bộ ví dụ với bộ giải mạch
 node tests/harness.mjs tests/t_basic.ino   # chạy một sketch, in Serial
-node tests/t_radio.mjs                 # cảm biến/relay mới, LoRa/ESP-NOW/CoAP giữa hai runtime
+node tests/t_radio.mjs                 # cảm biến/relay mới, LoRa/ESP-NOW/CoAP/WebServer giữa hai runtime
 ```
 
 ## Giới hạn

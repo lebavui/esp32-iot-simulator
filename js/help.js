@@ -12,7 +12,7 @@ export const HELP_HTML = `
   <li><b>＋ Linh kiện</b> để thêm linh kiện; kéo thả để di chuyển; phím <code>R</code> xoay, <code>Delete</code> xóa.</li>
   <li>Nối dây: bấm vào một chân (di chuột lên chân để xem tên), bấm vào nền để thêm điểm gấp, bấm vào chân thứ hai để kết thúc. <code>Esc</code>/chuột phải để hủy.</li>
   <li>Chọn dây để đổi màu/xóa; nháy đúp lên dây để thêm điểm gấp, kéo điểm gấp để chỉnh.</li>
-  <li>Khi đang chạy: nhấn giữ <b>nút nhấn</b>, bấm <b>công tắc gạt</b>, bấm <b>PIR</b> để mô phỏng chuyển động; chọn cảm biến (DHT22, LDR, HC-SR04, biến trở) để kéo thanh trượt thay đổi giá trị đo.</li>
+  <li>Khi đang chạy: nhấn giữ <b>nút nhấn</b>, bấm <b>công tắc gạt</b>, bấm <b>PIR</b> để mô phỏng chuyển động; chọn cảm biến (DHT22, DS18B20, AHT10, LDR, photodiode, HC-SR04, biến trở…) để kéo thanh trượt thay đổi giá trị đo.</li>
   <li>Mô phỏng điện: điện trở, điện trở kéo lên/xuống nội (<code>INPUT_PULLUP</code>), cầu phân áp, biến trở được giải theo định luật Ohm; phát hiện ngắn mạch; cảnh báo khi chân GPIO nhận điện áp trên 3,6 V (cảm biến 5 V như MQ-2 cần cầu phân áp). LED/7 đoạn/RGB sáng theo chênh lệch điện áp (PWM điều chỉnh độ sáng).</li>
   <li>Linh kiện I2C (LCD, OLED) phải nối vào chân SDA/SCL mặc định của board — ESP32 DevKit: GPIO21/22, XIAO ESP32-C3: D4/D5 (GPIO6/7), XIAO ESP32-S3: D4/D5 (GPIO5/6), C3 SuperMini: GPIO8/9 — hoặc chân trong <code>Wire.begin(sda, scl)</code>, và cấp nguồn VCC/GND.</li>
   <li>Đổi board bằng ô chọn board trên thanh công cụ: sơ đồ và code được chuyển sang board mới — I2C sang chân SDA/SCL của board, đầu vào analog sang chân ADC1, các chân khác giữ nguyên số GPIO nếu board có (hoặc vị trí D0…D10 giữa hai board XIAO), số chân trong code được sửa theo; board không có LED trên board / nút BOOT thì thêm LED / nút nhấn ngoài. Các thay đổi được ghi trong Serial Monitor. Ví dụ mẫu luôn được mở theo board đang chọn. Chọn board trên sơ đồ để xem <code>LED_BUILTIN</code> và chân I2C của nó.</li>
@@ -44,7 +44,8 @@ export const HELP_HTML = `
   <li>Dùng tab <b>MQTT Client</b> để subscribe/publish cùng broker và tương tác với ESP32 ảo.</li>
   <li>HTTP được thực hiện bằng <code>fetch</code>. Khi chạy bằng <code>node server.js</code>, yêu cầu được chuyển qua proxy cục bộ nên không bị lỗi CORS và gọi được cả <code>http://</code>.</li>
   <li>Tab <b>Nhật ký mạng</b> ghi lại mọi sự kiện WiFi / HTTP / MQTT / LoRa / ESP-NOW / CoAP của thiết bị.</li>
-  <li><b>Nhiều board</b>: mở trình giả lập ở nhiều tab (cùng địa chỉ) — mỗi tab là một board, các tab nghe thấy nhau qua LoRa, ESP-NOW và UDP/CoAP trong mạng WiFi ảo 10.13.37.x (IP động .100–.249, đặt IP tĩnh bằng <code>WiFi.config</code>). Ví dụ: chạy "LoRa: node gửi" ở tab này và "LoRa: node nhận" ở tab khác.</li>
+  <li><b>Nhiều board</b>: mở trình giả lập ở nhiều tab (cùng địa chỉ) — mỗi tab là một board, các tab nghe thấy nhau qua LoRa, ESP-NOW và UDP/CoAP/HTTP trong mạng WiFi ảo 10.13.37.x (IP động .100–.249, đặt IP tĩnh bằng <code>WiFi.config</code>). Ví dụ: chạy "LoRa: node gửi" ở tab này và "LoRa: node nhận" ở tab khác.</li>
+  <li><b>Web server trên board</b> (<code>WebServer.h</code>): khi board chạy, tab Nhật ký mạng hiện link <code>…/__dev/10.13.37.x/</code> — mở trong tab mới để dùng trang web của board (form, nút bấm, <code>fetch</code>); board khác truy cập bằng <code>HTTPClient</code>.</li>
   <li>UDP/CoAP ra Internet (vd. <code>coap.me</code>) và <code>WiFi.hostByName</code> cần chạy bằng <code>node server.js</code>.</li>
 </ul>
 <h3>Giới hạn</h3>

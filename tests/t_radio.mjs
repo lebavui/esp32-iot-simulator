@@ -47,7 +47,7 @@ const until = async (fn, ms = 3000) => { const t0 = Date.now(); while (Date.now(
 {
   const api = (vcc) => ({ powered: () => true, V: (pin) => (pin === 'VCC' ? vcc : 0) });
   for (const [type, key, lo, hi] of [['esp32-iot-flame-sensor', 'flame', 0, 100], ['esp32-iot-mq2', 'gas', 100, 9000],
-    ['esp32-iot-rain-sensor', 'rain', 0, 100], ['esp32-iot-soil-moisture-sensor', 'moisture', 0, 100]]) {
+    ['esp32-iot-rain-sensor', 'rain', 0, 100], ['esp32-iot-soil-moisture-sensor', 'moisture', 0, 100], ['esp32-iot-photodiode-sensor', 'lux', 0, 2000]]) {
     const p = (v) => ({ type, attrs: { ...defaultAttrs(type), [key]: v } });
     const d = (v) => Object.fromEntries(PARTS[type].drive(p(v), api(3.3)).map((x) => [x.pin, x.v]));
     const a = d(lo), b = d(hi);
@@ -128,6 +128,89 @@ const until = async (fn, ms = 3000) => { const t0 = Date.now(); while (Date.now(
   t.sim.invalidate();
   check('relay: low-trigger module energized by LOW input', (t.sim.ensure(), t.part('relay1').energized));
   await t.stop();
+}
+
+// ---------------------------------------------------------------- catalog sensors: rain/photodiode DO, DS18B20, DHT11, AHT10
+{
+  const t = boot('rain-digital');
+  await wait(200);
+  t.set('rain1', 'rain', 60);
+  check('rain DO: wet → alarm, LED on', await until(() => t.out.includes('bắt đầu mưa') && t.V('led1', 'A') > 2), t.out);
+  t.set('rain1', 'rain', 0);
+  check('rain DO: dry → stopped', await until(() => t.out.includes('Tạnh mưa')));
+  await t.stop();
+}
+{
+  const t = boot('photodiode-digital');
+  await wait(200);
+  for (let i = 0; i < 2; i++) { t.set('pd1', 'lux', 20); await wait(120); t.set('pd1', 'lux', 1500); await wait(120); }
+  check('photodiode DO: interrupt counts beam breaks', await until(() => t.out.includes('Tổng số lần: 2')), t.out);
+  await t.stop();
+}
+{
+  const t = boot('photodiode-analog', { attrs: { pd1: { lux: 800 } } });
+  await until(() => /lux≈\s*[\d.]+/.test(t.out));
+  const lux = Number((/lux≈\s*([\d.]+)/.exec(t.out) || [])[1]);
+  check('photodiode AO: lux from the linear photocurrent', Math.abs(lux - 800) < 30, `${lux} lux`);
+  await t.stop();
+}
+{
+  const t = boot('ds18b20', { attrs: { ds1: { temperature: 22.3 }, ds2: { temperature: -5 } } });
+  check('DS18B20: 2 sensors found on the bus', await until(() => t.out.includes('Tìm thấy 2 cảm biến')), t.out);
+  check('DS18B20: 12-bit readings (0.0625 °C steps)', await until(() => t.out.includes('#0: 22.31 °C') && t.out.includes('#1: -5.00 °C'), 3000), t.out);
+  check('DS18B20: ROM codes start with family 0x28', /#0 mã ROM: 28[0-9A-F]{14}/.test(t.out));
+  await t.stop();
+  const np = boot('ds18b20', { drop: ['rpu:1'] });
+  check('DS18B20 without the 4.7 kΩ pull-up: not found + warning', await until(() => np.out.includes('Tìm thấy 0 cảm biến')) && np.logs.some((l) => l.includes('4.7 kΩ')), np.logs.join(' | '));
+  await np.stop();
+}
+{
+  const t = boot('dht11', { attrs: { dht1: { temperature: 31.6, humidity: 55.4 } } });
+  check('DHT11: whole-degree readings', await until(() => t.out.includes('Nhiệt độ: 32 °C  Độ ẩm: 55 %')), t.out);
+  await t.stop();
+}
+{
+  const t = boot('aht10', { attrs: { aht1: { temperature: 24.2, humidity: 48 } } });
+  check('AHT10: I2C scan sees AHT (0x38) and OLED (0x3C)', await until(() => t.out.includes('0x38 0x3C')), t.out);
+  check('AHT10: getEvent() values', await until(() => t.out.includes('Nhiệt độ: 24.20 °C  Độ ẩm: 48.00 %RH')), t.out);
+  await t.stop();
+}
+
+// ---------------------------------------------------------------- WebServer ↔ HTTPClient on the virtual network
+{
+  const srv = boot('webserver-config');
+  await until(() => srv.out.includes('HTTP server đã chạy'));
+  const cli = boot({ diagram: { parts: [{ type: 'esp32-iot-esp32-devkit-v1', id: 'esp', top: 0, left: 0, attrs: {} }], connections: [] }, code: `
+#include <WiFi.h>
+#include <HTTPClient.h>
+void req(const char* method, const char* url, String body) {
+  HTTPClient http;
+  http.begin(url);
+  if (body.length()) http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+  int code = String(method) == "POST" ? http.POST(body) : http.GET();
+  Serial.printf("%s %s -> %d %s\\n", method, url, code, http.getString().c_str());
+  http.end();
+}
+void setup() {
+  Serial.begin(115200);
+  WiFi.begin("x", "");
+  while (WiFi.status() != WL_CONNECTED) delay(100);
+  req("GET", "http://10.13.37.60/api/status", "");
+  req("GET", "http://10.13.37.60/led?state=on", "");
+  req("POST", "http://10.13.37.60/save", "name=Phong+ngu&interval=3&limit=25.5");
+  req("GET", "http://10.13.37.60/nope", "");
+  req("GET", "http://10.13.37.99/", "");
+  req("GET", "http://10.13.37.60/", "");
+}
+void loop() { delay(100); }` });
+  check('WebServer: GET /api/status → JSON', await until(() => /api\/status -> 200 \{"name":"ESP32 Phòng khách","temperature":28.5/.test(cli.out), 6000), cli.out);
+  check('WebServer: /led?state=on drives the LED', await until(() => cli.out.includes('"led":true') && srv.V('led1', 'A') > 2), cli.out);
+  check('WebServer: POST form → arguments, 303 + Location', await until(() => cli.out.includes('/save -> 303')) && srv.out.includes('tên="Phong ngu", chu kỳ=3 s, ngưỡng=25.5'), srv.out);
+  check('WebServer: onNotFound → 404', await until(() => cli.out.includes('/nope -> 404 Không tìm thấy: /nope')));
+  check('HTTPClient: nobody at that address → error', await until(() => cli.out.includes('10.13.37.99/ -> -1'), 8000), cli.out);
+  check('WebServer: page has the saved name filled in', await until(() => cli.out.includes('<title>Phong ngu</title>'), 4000));
+  await cli.stop();
+  await srv.stop();
 }
 
 // ---------------------------------------------------------------- LoRa

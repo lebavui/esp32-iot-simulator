@@ -17,7 +17,7 @@ node tests/compile_examples.mjs              # compile-only check of every examp
 node tests/run_examples.mjs <exampleId> [ms] # run one example (id from EXAMPLES) for ms (default 1500)
 node tests/harness.mjs tests/t_basic.ino [ms] [v]   # run a single sketch with a fake circuit; 'v' prints generated JS
 node tests/t_irq.mjs                         # interrupt test (pir-interrupt example)
-node tests/t_radio.mjs                       # new sensor/relay parts, LoRa/ESP-NOW/UDP/CoAP between two runtimes
+node tests/t_radio.mjs                       # new sensor/relay parts, LoRa/ESP-NOW/UDP/CoAP/WebServer between two runtimes
 ```
 
 There is no assertion framework or linter: tests print Serial output / pin snapshots, and you inspect the output. `run_examples.mjs` honors `DBG=1` for extra GPIO dumps.
@@ -38,7 +38,7 @@ Generated code returns `{init, setup, loop}` and references runtime helpers via 
 - `runtime.js`: `Runtime` class — Arduino core functions, cooperative scheduler (delay, FreeRTOS tasks, ISR queue drained during `delay`/yield), stop via `StopSignal`/`stopPromise`. Constructed with `{ sim, io, settings }`; `io` is the UI callback interface (`serialWrite`, `log`, `net`, `wifi`, `restart`, `onStopped`).
 - `libs.js`: simulated libraries. Each class is constructed as `new Cls(R, ...ctorArgs)` and must be registered in `LIBS`. `static meta = { ret: {...} }` declares method return types for the compiler (affects print formatting/arithmetic).
 - `meta.js`: return types of global functions (`FUNCS`), constants, global objects — the compiler's view of the API surface. Adding a built-in function means implementing it in `runtime.js` (`makeFuncs`) **and** declaring it in `FUNCS`.
-- `radio.js`: LoRa (`LoRaClass`, global `LoRa`, needs an `esp32-iot-lora-ra02` part on NSS + the board's SPI pins), ESP-NOW (`espNowFuncs`, merged into `F`), `WiFiUDP`, CoAP (`Coap`/`CoapPacket`). All runtimes of one origin share a "virtual air" `BroadcastChannel` (other tabs; several runtimes in one Node process in tests); UDP to non-`10.13.37.x` addresses goes through `server.js` `/__proxy/udp`. Library callbacks (receive/send done) are queued on `isrQueue`. The runtime's macrotask yield falls back to `setTimeout` every 25 ms so a `loop()` without `delay()` doesn't starve those messages. Structs get a byte layout (`S_x.$L`, `$.pack`/`$.unpack`) used by `memcpy` and `esp_now_send`.
+- `radio.js`: LoRa (`LoRaClass`, global `LoRa`, needs an `esp32-iot-lora-ra02` part on NSS + the board's SPI pins), ESP-NOW (`espNowFuncs`, merged into `F`), `WiFiUDP`, CoAP (`Coap`/`CoapPacket`), `WebServer` + `lanHttp` (HTTP between boards: `http-req`/`http-resp` air messages; `HTTPClient` to `10.13.37.x` uses it; browsers reach a board's server via `sw.js` at `/__dev/<ip>/…`, `server.js` serves a page installing the worker if it isn't yet). All runtimes of one origin share a "virtual air" `BroadcastChannel` (other tabs; several runtimes in one Node process in tests); UDP to non-`10.13.37.x` addresses goes through `server.js` `/__proxy/udp`. Library callbacks (receive/send done) are queued on `isrQueue`. The runtime's macrotask yield falls back to `setTimeout` every 25 ms so a `loop()` without `delay()` doesn't starve those messages. Structs get a byte layout (`S_x.$L`, `$.pack`/`$.unpack`) used by `memcpy` and `esp_now_send`.
 - `print.js`: the `Print` base class.
 - `format.js`: printf/strftime and string encoding. Serial/strings are handled as byte ("bin") strings internally; convert with `binToUtf8`/`utf8ToBin`.
 
@@ -56,7 +56,7 @@ The board is chosen with the `#boardSelect` dropdown (boards are hidden from the
 
 ### Other
 - `server.js`: static file server + `/__proxy` HTTP proxy (bound to 127.0.0.1) so simulated `HTTPClient` avoids CORS. Env: `HOST`, `PORT`, `PROXY_BLOCK_PRIVATE=1` (proxy refuses loopback/private/link-local targets, re-checked on each redirect — set in the Docker image for public deployment; see `DEPLOY.md`: image built and pushed to Docker Hub by `deploy/push.ps1`, VPS runs `docker-compose.yml` + `.env` behind nginx from `deploy/`). `/__proxy/dns` and `/__proxy/udp` (allowed ports: `UDP_PORTS`, default 5683) serve `WiFi.hostByName` / `WiFiUDP` / CoAP. MQTT goes over WebSocket via mqtt.js; TCP broker addresses are mapped to WS URLs (mapping editable in settings).
-- `js/examples.js`: `EXAMPLES` (id, code, diagram) — also the main test corpus, so new features should usually get an example.
+- `js/examples.js`: `EXAMPLES` (id, code, diagram) — also the main test corpus, so new features should usually get an example. `CATALOG` at the end sets the menu (categories, order, numbered names); examples not listed get `hidden: true` (kept for tests, not shown in `#exampleSelect`).
 
 ## Known limitations (by design)
 Code is transpiled to JS, not Xtensa emulation (wall-clock timing). Not supported: user classes with methods, user templates, `new`/`delete`, `goto`, raw TCP sockets. The circuit model is DC-only; LEDs/diodes are not modeled as conducting elements.

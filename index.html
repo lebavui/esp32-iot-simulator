@@ -49,7 +49,6 @@
         <button class="tab" data-tab="diagram">diagram.json</button>
         <span class="tabs-spacer"></span>
         <span class="hint" id="cursorPos"></span>
-        <button class="pane-toggle" id="btnHideCode" title="Ẩn code (Ctrl+B)">«</button>
       </div>
       <div class="editor-wrap"><textarea id="codeArea"></textarea></div>
       <div class="problems" id="problems" hidden>
@@ -58,11 +57,10 @@
       </div>
     </section>
 
-    <div class="gutter gutter-v" id="gutterV" title="Kéo để thay đổi kích thước"></div>
+    <div class="gutter gutter-v" id="gutterV" title="Kéo để thay đổi kích thước"><button class="gutter-btn" id="btnToggleCode" title="Ẩn code (Ctrl+B)">‹</button></div>
 
     <section class="pane sim-pane" id="simPane">
       <div class="sim-toolbar">
-        <button id="btnToggleCode" class="pane-toggle" title="Ẩn/hiện code (Ctrl+B)">&lt;/&gt;</button>
         <button id="btnRun" class="run" title="Biên dịch và chạy (Ctrl+Enter)">▶</button>
         <button id="btnStop" class="stop" title="Dừng" disabled>■</button>
         <button id="btnRestart" title="Khởi động lại" disabled>↻</button>
@@ -80,7 +78,7 @@
         <div class="inspector" id="inspector" hidden></div>
         <div class="canvas-hint">Kéo thả linh kiện • Bấm vào chân để nối dây • Bấm nền để thêm điểm gấp • Esc hủy • R xoay • Delete xóa</div>
       </div>
-      <div class="gutter gutter-h" id="gutterH"></div>
+      <div class="gutter gutter-h" id="gutterH" title="Kéo để thay đổi kích thước"><button class="gutter-btn" id="btnToggleBottom" title="Thu gọn panel (Ctrl+J)">▾</button></div>
       <div class="bottom" id="bottom">
         <div class="tabs" id="bottomTabs">
           <button class="tab active" data-tab="serial">Serial Monitor</button>
@@ -89,7 +87,6 @@
           <span class="tabs-spacer"></span>
           <label class="chk"><input type="checkbox" id="autoscroll" checked> Tự cuộn</label>
           <button id="btnClear" title="Xóa">🗑</button>
-          <button class="pane-toggle" id="btnToggleBottom" title="Thu gọn panel (Ctrl+J)">▾</button>
         </div>
         <div class="bottom-body">
           <div class="panel active" data-panel="serial">

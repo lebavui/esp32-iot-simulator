@@ -360,6 +360,36 @@ export const PARTS = {
       <text x="20" y="49" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">DHT11</text>`;
     },
   },
+  // DS18B20 (TO-92) on a 1-Wire bus: DQ needs a 4.7 kΩ pull-up to VDD; several sensors may share one bus
+  'esp32-iot-ds18b20': {
+    label: 'DS18B20 (nhiệt độ, 1-Wire)', category: 'Cảm biến', power: ['VDD', 'GND'],
+    attrs: [{ key: 'temperature', label: 'Nhiệt độ (°C)', type: 'range', min: -55, max: 125, step: 0.1, default: 25, live: true }],
+    size: () => ({ w: 34, h: 58 }),
+    pins: () => rowPins(['GND', 'DQ', 'VDD'], 9, 8, 56),
+    render() {
+      return `${[9, 17, 25].map((x) => `<line x1="${x}" y1="30" x2="${x}" y2="58" stroke="#9aa" stroke-width="1.6"/>`).join('')}
+      <path d="M4 32V14a13 13 0 0 1 26 0v18z" fill="#1d1f24" stroke="#000"/>
+      <text x="17" y="20" text-anchor="middle" font-size="4.6" fill="#ddd" font-weight="bold">DS18B20</text>
+      <text x="17" y="27" text-anchor="middle" font-size="3.6" fill="#999">1-Wire</text>`;
+    },
+  },
+  // AHT10/AHT20 temperature/humidity module (I2C, fixed address 0x38)
+  'esp32-iot-aht10': {
+    label: 'AHT10/AHT20 (nhiệt độ/độ ẩm, I2C)', category: 'Cảm biến', power: ['VIN', 'GND'], i2c: 'aht',
+    attrs: [{ key: 'temperature', label: 'Nhiệt độ (°C)', type: 'range', min: -40, max: 85, step: 0.1, default: 26.5, live: true },
+      { key: 'humidity', label: 'Độ ẩm (%)', type: 'range', min: 0, max: 100, step: 0.5, default: 60, live: true },
+      { key: 'address', label: 'Địa chỉ I2C', type: 'select', options: ['0x38', '0x39'], default: '0x38' }],
+    size: () => ({ w: 60, h: 56 }),
+    pins: () => rowPins(['VIN', 'GND', 'SCL', 'SDA'], 12, 12, 54),
+    render() {
+      return `${[12, 24, 36, 48].map((x) => `<line x1="${x}" y1="40" x2="${x}" y2="56" stroke="#d4af37" stroke-width="1.8"/>`).join('')}
+      <rect x="2" y="2" width="56" height="42" rx="3" fill="#6a1b9a"/>
+      <circle cx="8" cy="8" r="2.4" fill="#ddd"/><circle cx="52" cy="8" r="2.4" fill="#ddd"/>
+      <rect x="22" y="8" width="16" height="16" rx="1.5" fill="#e8e8e8" stroke="#999"/><circle cx="30" cy="16" r="3" fill="#bbb"/>
+      <text x="30" y="31" text-anchor="middle" font-size="5" fill="#fff" font-weight="bold">AHT10</text>
+      ${['VIN', 'GND', 'SCL', 'SDA'].map((n, i) => `<text x="${12 + i * 12}" y="40" text-anchor="middle" font-size="4" fill="#fff">${n}</text>`).join('')}`;
+    },
+  },
   'esp32-iot-hc-sr04': {
     label: 'HC-SR04 (siêu âm)', category: 'Cảm biến', power: ['VCC', 'GND'],
     attrs: [{ key: 'distance', label: 'Khoảng cách (cm)', type: 'range', min: 2, max: 400, step: 1, default: 100, live: true }],
@@ -424,6 +454,20 @@ export const PARTS = {
     look(part) {
       const k = clamp01(num(part.attrs.gas) / 10000);
       part.el.querySelector('.mesh').setAttribute('fill', `rgb(${Math.round(141 - k * 60)},${Math.round(147 - k * 80)},${Math.round(155 - k * 110)})`);
+    },
+  }),
+  // photodiode light sensor: the photocurrent (∝ lux) through the load resistor pulls AO down almost linearly,
+  // so brighter → lower AO; DO LOW when brighter than the threshold (the inverse of the LDR module's DO)
+  'esp32-iot-photodiode-sensor': comparatorModule({
+    label: 'Cảm biến ánh sáng (photodiode)',
+    attrs: [{ key: 'lux', label: 'Độ sáng (lux)', type: 'range', min: 0, max: 2000, step: 1, default: 300, live: true },
+      { key: 'threshold', label: 'Ngưỡng DO (lux)', type: 'number', default: 200 }],
+    sense: (p) => ({ ao: 0.98 - 0.93 * clamp01(num(p.attrs.lux) / 2000), on: num(p.attrs.lux) >= num(p.attrs.threshold, 200) }),
+    element: `<line x1="0" y1="17" x2="8" y2="17" stroke="#ccc" stroke-width="1.4"/><line x1="0" y1="21" x2="8" y2="21" stroke="#ccc" stroke-width="1.4"/>
+      <rect x="8" y="11" width="9" height="16" rx="1" fill="#1a1a1a"/><path class="lens" d="M17 11h4a8 8 0 0 1 0 16h-4z" fill="#2a2a2a" stroke="#555"/>`,
+    look(part) {
+      const k = clamp01(num(part.attrs.lux) / 2000);
+      part.el.querySelector('.lens').setAttribute('fill', `rgb(${Math.round(42 + k * 190)},${Math.round(42 + k * 170)},${Math.round(42 + k * 60)})`);
     },
   }),
   // rain sensor: plate + comparator board; wetter plate → lower AO; DO LOW when wet

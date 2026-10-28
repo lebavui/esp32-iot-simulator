@@ -15,6 +15,7 @@ const SUPPORTED_HEADERS = [
   'Adafruit_NeoPixel.h', 'Preferences.h', 'time.h', 'WiFiClient.h', 'WiFiClientSecure.h', 'SPI.h', 'math.h', 'stdio.h',
   'stdlib.h', 'string.h', 'esp_system.h', 'freertos/FreeRTOS.h', 'freertos/task.h', 'esp_wifi.h', 'WiFiMulti.h', 'esp_timer.h',
   'LoRa.h', 'esp_now.h', 'esp_mac.h', 'WiFiUdp.h', 'WiFiUDP.h', 'coap-simple.h',
+  'OneWire.h', 'DallasTemperature.h', 'Adafruit_AHTX0.h', 'WebServer.h', 'freertos/queue.h', 'freertos/semphr.h',
 ];
 
 // board: part type of the microcontroller board in the diagram (its pins_arduino.h constants and target macros)

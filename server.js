@@ -14,7 +14,7 @@ import dns from 'dns/promises';
 import dgram from 'dgram';
 import { fileURLToPath } from 'url';
 
-const PORT = Number(process.argv[2] || process.env.PORT || 8080);
+const PORT = Number(process.argv[2] || process.env.PORT || 8090);
 const HOST = process.env.HOST || '127.0.0.1';
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const MIME = {
@@ -156,6 +156,14 @@ const server = http.createServer(async (req, res) => {
   if (u.pathname === '/__proxy' && req.method === 'POST') { await handleProxy(req, res); return; }
   if (u.pathname === '/__proxy/dns' && req.method === 'POST') { await handleDns(req, res); return; }
   if (u.pathname === '/__proxy/udp' && req.method === 'POST') { await handleUdp(req, res); return; }
+  // web pages of simulated boards are served by sw.js; reaching the server means it is not installed yet
+  if (u.pathname.startsWith('/__dev/')) {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(`<!doctype html><meta charset="utf-8"><title>Đang kết nối board…</title><p style="font-family:sans-serif">Đang cài trình chuyển tiếp tới board ảo…</p>
+<script>navigator.serviceWorker ? navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.ready).then(() => location.reload())
+  : document.body.textContent = 'Trình duyệt không hỗ trợ Service Worker (cần http://localhost hoặc https).';</script>`);
+    return;
+  }
   let p = decodeURIComponent(u.pathname);
   if (p.endsWith('/')) p += 'index.html';
   const file = path.normalize(path.join(ROOT, p));
