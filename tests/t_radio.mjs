@@ -176,6 +176,52 @@ const until = async (fn, ms = 3000) => { const t0 = Date.now(); while (Date.now(
   await t.stop();
 }
 
+// ---------------------------------------------------------------- I2C sensors: SHT30+BMP280, BH1750, VL53L0X, MAX30100, MLX90614
+{
+  const t = boot('sht30-bmp280', { attrs: { sht1: { temperature: 21.5, humidity: 40 }, bmp1: { pressure: 1013.25 } } });
+  check('SHT30 + BMP280: readings, altitude 0 m at sea-level pressure', await until(() => /SHT30: 21\.50 °C {2}40\.00 %RH .*BMP280: 1013\.2\d hPa {2}-?0\.\d m/.test(t.out)), t.out);
+  t.set('bmp1', 'pressure', 900);
+  check('BMP280: lower pressure → higher altitude', await until(() => t.out.includes('900.00 hPa  988.')), t.out.split('\n').slice(-2).join(' | '));
+  await t.stop();
+  const ns = boot('sht30-bmp280', { drop: ['sht1:SDA'] });
+  check('SHT30 not wired: begin() fails, reads NaN', await until(() => ns.out.includes('Không tìm thấy SHT30') && ns.out.includes('Lỗi đọc SHT30')), ns.out);
+  await ns.stop();
+}
+{
+  const t = boot('bh1750', { attrs: { bh1: { lux: 12345 } } });
+  check('BH1750: lux reading', await until(() => t.out.includes('Ánh sáng: 12345.0 lx (Nang gat)')), t.out);
+  t.set('bh1', 'lux', 3);
+  check('BH1750: live change', await until(() => t.out.includes('Ánh sáng: 3.3 lx (Toi)')), t.out.split('\n').slice(-2).join(' | '));
+  await t.stop();
+}
+{
+  const t = boot('vl53l0x', { attrs: { tof1: { distance: 1234 } } });
+  check('VL53L0X: distance', await until(() => t.out.includes('Khoảng cách: 1234 mm (123.4 cm)')), t.out);
+  t.set('tof1', 'distance', 2400);
+  check('VL53L0X: beyond 2 m → RangeStatus 4', await until(() => t.out.includes('Ngoài tầm đo')));
+  await t.stop();
+}
+{
+  const t = boot('max30100', { attrs: { pox1: { bpm: 90, spo2: 95 } } });
+  check('MAX30100: heart rate after a few beats', await until(() => /Nhịp tim: (8[89]|9[0-2])\.\d bpm/.test(t.out), 5000), t.out);
+  check('MAX30100: SpO2 after more beats', await until(() => /SpO2: 9[45] %/.test(t.out), 5000), t.out);
+  check('MAX30100: beat callback called', t.out.includes('Nhịp!'));
+  t.set('pox1', 'finger', 'Không');
+  check('MAX30100: finger removed → 0', await until(() => t.out.endsWith('Nhịp tim: 0.0 bpm  SpO2: 0 %\n'), 3000), t.out.slice(-80));
+  await t.stop();
+  // default IR current (50 mA) saturates: no beat, warning suggests 7.6 mA
+  const ex = EXAMPLES.find((e) => e.id === 'max30100');
+  const s = boot(ex, { code: ex.code.replace('pox.setIRLedCurrent(MAX30100_LED_CURR_7_6MA);', '') });
+  await wait(3000);
+  check('MAX30100 at 50 mA: no beats + warning', !s.out.includes('Nhịp!') && s.logs.some((l) => l.includes('MAX30100_LED_CURR_7_6MA')), s.logs.join(' | '));
+  await s.stop();
+}
+{
+  const t = boot('mlx90614', { attrs: { mlx1: { object: 38.2, ambient: 25 } } });
+  check('MLX90614: object/ambient (0.02 K steps)', await until(() => /Vật thể: 38\.[12]\d °C \(100\.\d\d °F\) {2}Môi trường: 2[45]\.\d\d °C/.test(t.out)), t.out);
+  await t.stop();
+}
+
 // ---------------------------------------------------------------- WebServer ↔ HTTPClient on the virtual network
 {
   const srv = boot('webserver-config');

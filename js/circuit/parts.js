@@ -29,6 +29,24 @@ const rowPins = (names, x0, dx, y) => names.map((n, i) => ({ name: n, x: x0 + i 
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 
+// I2C sensor breakout board (60×56, like the AHT10): `kind` is the i2c kind the library looks up, `addrs` the
+// selectable addresses (first = default), `chip` the SVG of the sensor in the upper half
+function i2cModule({ label, kind, color, title, addrs, attrs, chip, pins = ['VIN', 'GND', 'SCL', 'SDA'] }) {
+  return {
+    label, category: 'Cảm biến', power: pins.slice(0, 2), i2c: kind,
+    attrs: [...attrs, { key: 'address', label: 'Địa chỉ I2C', type: 'select', options: addrs, default: addrs[0] }],
+    size: () => ({ w: 60, h: 56 }),
+    pins: () => rowPins(pins, 12, 12, 54),
+    render() {
+      return `${[12, 24, 36, 48].map((x) => `<line x1="${x}" y1="40" x2="${x}" y2="56" stroke="#d4af37" stroke-width="1.8"/>`).join('')}
+      <rect x="2" y="2" width="56" height="42" rx="3" fill="${color}"/>
+      <circle cx="8" cy="8" r="2.4" fill="#ddd"/><circle cx="52" cy="8" r="2.4" fill="#ddd"/>${chip}
+      <text x="30" y="31" text-anchor="middle" font-size="${title.length > 7 ? 4.4 : 5}" fill="#fff" font-weight="bold">${title}</text>
+      ${pins.map((n, i) => `<text x="${12 + i * 12}" y="40" text-anchor="middle" font-size="4" fill="#fff">${n}</text>`).join('')}`;
+    },
+  };
+}
+
 // LM393 comparator sensor module, pins VCC GND DO AO on the right (like the LDR module). sense(part) gives
 // { ao: AO as a fraction of VCC, on: detected → DO pulled LOW and DO-LED lit }. The sensing element is drawn by
 // `element` on the left of the 90×38 board, or by `probe` in a pw×ph area left of the board (rain plate, soil fork);
@@ -390,6 +408,42 @@ export const PARTS = {
       ${['VIN', 'GND', 'SCL', 'SDA'].map((n, i) => `<text x="${12 + i * 12}" y="40" text-anchor="middle" font-size="4" fill="#fff">${n}</text>`).join('')}`;
     },
   },
+  // I2C sensor breakouts (js/runtime/i2c_sensors.js reads the attributes): 4 header pins at the bottom
+  'esp32-iot-sht30': i2cModule({
+    label: 'SHT30/SHT31 (nhiệt độ/độ ẩm, I2C)', kind: 'sht3x', color: '#0d47a1', title: 'SHT30', addrs: ['0x44', '0x45'],
+    attrs: [{ key: 'temperature', label: 'Nhiệt độ (°C)', type: 'range', min: -40, max: 125, step: 0.1, default: 27.3, live: true },
+      { key: 'humidity', label: 'Độ ẩm (%)', type: 'range', min: 0, max: 100, step: 0.5, default: 62, live: true }],
+    chip: '<rect x="23" y="9" width="14" height="14" rx="1" fill="#cfd2d6" stroke="#888"/><rect x="27" y="13" width="6" height="6" fill="#8a8f96"/>',
+  }),
+  'esp32-iot-bmp280': i2cModule({
+    label: 'BMP280 (áp suất/nhiệt độ, I2C)', kind: 'bmp280', color: '#5b2c8f', title: 'BMP280', addrs: ['0x76', '0x77'], pins: ['VCC', 'GND', 'SCL', 'SDA'],
+    attrs: [{ key: 'temperature', label: 'Nhiệt độ (°C)', type: 'range', min: -40, max: 85, step: 0.1, default: 27.8, live: true },
+      { key: 'pressure', label: 'Áp suất (hPa)', type: 'range', min: 300, max: 1100, step: 0.1, default: 1008.5, live: true }],
+    chip: '<rect x="25" y="10" width="10" height="10" rx="1" fill="#d8d8d8" stroke="#888"/><circle cx="32" cy="13" r="1.2" fill="#555"/>',
+  }),
+  'esp32-iot-bh1750': i2cModule({
+    label: 'BH1750 (cường độ ánh sáng, I2C)', kind: 'bh1750', color: '#1565c0', title: 'BH1750', addrs: ['0x23', '0x5C'], pins: ['VCC', 'GND', 'SCL', 'SDA'],
+    attrs: [{ key: 'lux', label: 'Ánh sáng (lux)', type: 'range', min: 0, max: 54000, step: 1, default: 350, live: true }],
+    chip: '<rect x="23" y="10" width="14" height="10" rx="1" fill="#222"/><rect x="27" y="12" width="6" height="6" fill="#e9e3c0"/>',
+  }),
+  'esp32-iot-vl53l0x': i2cModule({
+    label: 'VL53L0X (khoảng cách laser ToF, I2C)', kind: 'vl53l0x', color: '#6a1b9a', title: 'VL53L0X', addrs: ['0x29'],
+    attrs: [{ key: 'distance', label: 'Khoảng cách (mm)', type: 'range', min: 0, max: 2500, step: 1, default: 250, live: true }],
+    chip: '<rect x="22" y="10" width="16" height="10" rx="1.5" fill="#111"/><circle cx="26.5" cy="15" r="2" fill="#5a2a2a"/><circle cx="33.5" cy="15" r="2" fill="#333"/>',
+  }),
+  'esp32-iot-max30100': i2cModule({
+    label: 'MAX30100 (nhịp tim/SpO2, I2C)', kind: 'max30100', color: '#7b1fa2', title: 'MAX30100', addrs: ['0x57'],
+    attrs: [{ key: 'finger', label: 'Đặt ngón tay', type: 'select', options: ['Có', 'Không'], default: 'Có', live: true },
+      { key: 'bpm', label: 'Nhịp tim (BPM)', type: 'range', min: 40, max: 180, step: 1, default: 75, live: true },
+      { key: 'spo2', label: 'SpO2 (%)', type: 'range', min: 80, max: 100, step: 1, default: 97, live: true }],
+    chip: '<rect x="23" y="9" width="14" height="13" rx="2" fill="#2b2b2b"/><rect x="25" y="12" width="4" height="7" fill="#c62828" opacity="0.8"/><rect x="31" y="12" width="4" height="7" fill="#444"/>',
+  }),
+  'esp32-iot-mlx90614': i2cModule({
+    label: 'MLX90614 (nhiệt độ hồng ngoại, I2C)', kind: 'mlx90614', color: '#00695c', title: 'MLX90614', addrs: ['0x5A'],
+    attrs: [{ key: 'object', label: 'Nhiệt độ vật thể (°C)', type: 'range', min: -70, max: 380, step: 0.1, default: 36.6, live: true },
+      { key: 'ambient', label: 'Nhiệt độ môi trường (°C)', type: 'range', min: -40, max: 125, step: 0.1, default: 27, live: true }],
+    chip: '<circle cx="30" cy="15" r="8" fill="#b0b4b8" stroke="#777"/><circle cx="30" cy="15" r="4.5" fill="#333"/><circle cx="30" cy="15" r="2" fill="#6a5c3a"/>',
+  }),
   'esp32-iot-hc-sr04': {
     label: 'HC-SR04 (siêu âm)', category: 'Cảm biến', power: ['VCC', 'GND'],
     attrs: [{ key: 'distance', label: 'Khoảng cách (cm)', type: 'range', min: 2, max: 400, step: 1, default: 100, live: true }],

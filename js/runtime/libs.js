@@ -3,6 +3,7 @@
 import { strftime, bytesToBin, binToBytes, binToUtf8, utf8ToBin } from './format.js';
 import { glyph } from '../font5x7.js';
 import { Print } from './print.js';
+import { I2C_SENSOR_LIBS } from './i2c_sensors.js';
 import { RADIO_LIBS, lanIp, macBytes, resolveHost, isLanHost, lanHttp } from './radio.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1159,5 +1160,5 @@ export const LIBS = {
   tm: TmStruct, TwoWire, EspClass, Preferences,
   DHT, DHTesp, TempAndHumidity, Servo, ESP32PWM, OneWire, DallasTemperature, Adafruit_AHTX0, sensors_event_t,
   LiquidCrystal_I2C, Adafruit_SSD1306, Adafruit_NeoPixel,
-  ...RADIO_LIBS,
+  ...I2C_SENSOR_LIBS, ...RADIO_LIBS,
 };

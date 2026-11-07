@@ -1,5 +1,6 @@
 // Metadata about the Arduino-ESP32 API surface: return types for the compiler,
 // constant values, and global objects. Implementations live in runtime.js / libs.js.
+import { MAX30100_CONSTS } from './i2c_sensors.js';
 
 // Return types: void,int,long,ulong,u8,u16,float,double,bool,String,char,cstr,any,
 // 'arg0' (same as first argument), 'mix' (int unless any argument is floating point),
@@ -131,6 +132,10 @@ export const CONSTS = {
   COAP_IF_MATCH: [1, 'int'], COAP_URI_HOST: [3, 'int'], COAP_E_TAG: [4, 'int'], COAP_IF_NONE_MATCH: [5, 'int'], COAP_OBSERVE: [6, 'int'],
   COAP_URI_PORT: [7, 'int'], COAP_LOCATION_PATH: [8, 'int'], COAP_URI_PATH: [11, 'int'], COAP_CONTENT_FORMAT: [12, 'int'],
   COAP_MAX_AGE: [14, 'int'], COAP_URI_QUERY: [15, 'int'], COAP_ACCEPT: [17, 'int'], COAP_LOCATION_QUERY: [20, 'int'],
+  // I2C sensors (js/runtime/i2c_sensors.js)
+  SHT31_DEFAULT_ADDR: [0x44, 'int'], BMP280_ADDRESS: [0x77, 'int'], BMP280_ADDRESS_ALT: [0x76, 'int'], BMP280_CHIPID: [0x58, 'int'],
+  MLX90614_I2CADDR: [0x5A, 'int'], VL53L0X_I2C_ADDR: [0x29, 'int'], MAX30100_I2C_ADDRESS: [0x57, 'int'],
+  ...MAX30100_CONSTS,
 };
 
 // Global objects -> library class name

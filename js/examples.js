@@ -2339,6 +2339,340 @@ void loop() {
     }),
   },
   {
+    id: 'sht30-bmp280', name: 'SHT30 & BMP280 (I2C): nhiệt độ, độ ẩm, áp suất → OLED', category: 'Cảm biến I2C',
+    code: `// Trạm thời tiết mini: 3 thiết bị I2C dùng chung 2 dây SDA/SCL, mỗi thiết bị một địa chỉ:
+//  - SHT30  (0x44): nhiệt độ ±0.2 °C, độ ẩm ±2 %RH — thư viện Adafruit SHT31 (dùng cho cả SHT30/SHT31)
+//  - BMP280 (0x76): áp suất ±1 hPa → tính độ cao so với mực nước biển — thư viện Adafruit BMP280
+//  - OLED SSD1306 (0x3C)
+// Khi chạy: chọn từng cảm biến và kéo thanh trượt nhiệt độ / độ ẩm / áp suất.
+#include <Wire.h>
+#include <Adafruit_SHT31.h>
+#include <Adafruit_BMP280.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SEA_LEVEL_HPA 1013.25   // áp suất mực nước biển tại nơi đo (hPa), dùng để tính độ cao
+
+Adafruit_SHT31 sht30;
+Adafruit_BMP280 bmp;
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+
+// điểm sương (công thức Magnus): nhiệt độ mà hơi nước bắt đầu ngưng tụ
+float dewPoint(float t, float h) {
+  float g = log(h / 100.0) + 17.62 * t / (243.12 + t);
+  return 243.12 * g / (17.62 - g);
+}
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) Serial.println("Không tìm thấy OLED!");
+  display.setTextColor(SSD1306_WHITE);
+  if (!sht30.begin(0x44)) Serial.println("Không tìm thấy SHT30 (0x44)!");
+  // module GY-BMP280 thường có địa chỉ 0x76 (chân SDO nối GND); mặc định của thư viện là 0x77
+  if (!bmp.begin(0x76)) Serial.println("Không tìm thấy BMP280 (0x76)!");
+  bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     // đo liên tục
+                  Adafruit_BMP280::SAMPLING_X2,     // lấy mẫu nhiệt độ x2
+                  Adafruit_BMP280::SAMPLING_X16,    // lấy mẫu áp suất x16 (ít nhiễu)
+                  Adafruit_BMP280::FILTER_X16,      // lọc IIR
+                  Adafruit_BMP280::STANDBY_MS_500); // nghỉ 500 ms giữa hai lần đo
+}
+
+void loop() {
+  float t = sht30.readTemperature();
+  float h = sht30.readHumidity();
+  float p = bmp.readPressure() / 100.0;          // Pa → hPa
+  float alt = bmp.readAltitude(SEA_LEVEL_HPA);   // m
+  if (isnan(t) || isnan(h)) Serial.println("Lỗi đọc SHT30!");
+  Serial.printf("SHT30: %.2f °C  %.2f %%RH  điểm sương %.1f °C | BMP280: %.2f hPa  %.1f m  (%.2f °C)\\n",
+                t, h, dewPoint(t, h), p, alt, bmp.readTemperature());
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print("SHT30 + BMP280");
+  display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
+  display.setCursor(0, 16); display.printf("Nhiet do: %.1f C", t);
+  display.setCursor(0, 28); display.printf("Do am   : %.1f %%", h);
+  display.setCursor(0, 40); display.printf("Ap suat : %.1f hPa", p);
+  display.setCursor(0, 52); display.printf("Do cao  : %.0f m", alt);
+  display.display();
+  delay(2000);
+}
+`,
+    diagram: compose({ parts: OLED_PARTS, conns: OLED_AUTO }, {
+      parts: [{ type: 'esp32-iot-sht30', id: 'sht1', top: 130, left: 220, attrs: { temperature: 27.3, humidity: 62 } },
+        { type: 'esp32-iot-bmp280', id: 'bmp1', top: 130, left: 300, attrs: { temperature: 27.8, pressure: 1008.5, address: '0x76' } }],
+      conns: [C('esp:D21', 'sht1:SDA', 'blue'), C('esp:D22', 'sht1:SCL', 'yellow'), C('esp:3V3', 'sht1:VIN', 'red'), C('esp:GND.2', 'sht1:GND', 'black'),
+        C('esp:D21', 'bmp1:SDA', 'blue'), C('esp:D22', 'bmp1:SCL', 'yellow'), C('esp:3V3', 'bmp1:VCC', 'red'), C('esp:GND.2', 'bmp1:GND', 'black')],
+    }),
+  },
+  {
+    id: 'bh1750', name: 'BH1750 (I2C): cường độ ánh sáng (lux) → OLED', category: 'Cảm biến I2C',
+    code: `// BH1750FVI: cảm biến ánh sáng số, đo trực tiếp ra lux (1 – 65535 lx), không cần hiệu chuẩn như quang trở.
+// Địa chỉ I2C: 0x23 (chân ADDR nối GND/để hở) hoặc 0x5C (ADDR nối VCC). Thư viện: BH1750 (Christopher Laws).
+// Khi chạy: chọn cảm biến BH1750 và kéo thanh "Ánh sáng (lux)".
+#include <Wire.h>
+#include <BH1750.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+BH1750 lightMeter(0x23);
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+
+// mức sáng tham khảo
+const char* level(float lux) {
+  if (lux < 10) return "Toi";
+  if (lux < 100) return "Mo (hanh lang)";
+  if (lux < 500) return "Trong nha";
+  if (lux < 1000) return "Phong lam viec";
+  if (lux < 10000) return "Ngoai troi ram";
+  return "Nang gat";
+}
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) Serial.println("Không tìm thấy OLED!");
+  display.setTextColor(SSD1306_WHITE);
+  // chế độ đo liên tục, độ phân giải cao 1 lx, mỗi lần đo ~120 ms
+  if (lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE)) Serial.println("BH1750 sẵn sàng");
+  else Serial.println("Không tìm thấy BH1750 — kiểm tra dây nối!");
+}
+
+void loop() {
+  if (!lightMeter.measurementReady()) return;   // chờ kết quả đo mới
+  float lux = lightMeter.readLightLevel();
+  if (lux < 0) { Serial.println("Lỗi đọc BH1750"); delay(500); return; }
+  Serial.printf("Ánh sáng: %.1f lx (%s)\\n", lux, level(lux));
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print("BH1750 - I2C 0x23");
+  display.setTextSize(2);
+  display.setCursor(0, 16);
+  display.printf("%.0f lx", lux);
+  display.setTextSize(1);
+  display.setCursor(0, 38);
+  display.print(level(lux));
+  // thanh mức sáng theo thang log (1 – 65535 lx)
+  int w = constrain(log10(lux + 1) / log10(65536.0) * 124, 0, 124);
+  display.drawRect(0, 52, 128, 10, SSD1306_WHITE);
+  display.fillRect(2, 54, w, 6, SSD1306_WHITE);
+  display.display();
+  delay(500);
+}
+`,
+    diagram: compose({ parts: OLED_PARTS, conns: OLED_AUTO }, {
+      parts: [{ type: 'esp32-iot-bh1750', id: 'bh1', top: 130, left: 250, attrs: { lux: 350 } }],
+      conns: [C('esp:D21', 'bh1:SDA', 'blue'), C('esp:D22', 'bh1:SCL', 'yellow'), C('esp:3V3', 'bh1:VCC', 'red'), C('esp:GND.2', 'bh1:GND', 'black')],
+    }),
+  },
+  {
+    id: 'vl53l0x', name: 'VL53L0X (I2C): đo khoảng cách laser → OLED', category: 'Cảm biến I2C',
+    code: `// VL53L0X: cảm biến khoảng cách laser ToF (time-of-flight) — đo thời gian tia laser 940 nm phản xạ về,
+// tầm đo ~30 – 2000 mm, độ phân giải 1 mm, địa chỉ I2C cố định 0x29. Thư viện: Adafruit VL53L0X.
+// Ngoài tầm đo (không có vật cản) RangeStatus = 4.
+// Khi chạy: chọn cảm biến VL53L0X và kéo thanh "Khoảng cách (mm)".
+#include <Wire.h>
+#include <Adafruit_VL53L0X.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+Adafruit_VL53L0X lox;
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) Serial.println("Không tìm thấy OLED!");
+  display.setTextColor(SSD1306_WHITE);
+  if (!lox.begin()) {
+    Serial.println("Không tìm thấy VL53L0X — kiểm tra dây nối!");
+    for (;;) delay(1000);
+  }
+  Serial.println("VL53L0X sẵn sàng");
+}
+
+void loop() {
+  VL53L0X_RangingMeasurementData_t measure;
+  lox.rangingTest(&measure, false);   // một lần đo (~33 ms); true: in thông tin gỡ lỗi
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print("VL53L0X - I2C 0x29");
+  if (measure.RangeStatus != 4) {
+    int mm = measure.RangeMilliMeter;
+    Serial.printf("Khoảng cách: %d mm (%.1f cm)\\n", mm, mm / 10.0);
+    display.setTextSize(2);
+    display.setCursor(0, 18);
+    display.printf("%d mm", mm);
+    display.setTextSize(1);
+    display.setCursor(0, 38);
+    display.printf("= %.1f cm", mm / 10.0);
+    // thanh khoảng cách 0 – 2000 mm
+    display.drawRect(0, 52, 128, 10, SSD1306_WHITE);
+    display.fillRect(2, 54, map(constrain(mm, 0, 2000), 0, 2000, 0, 124), 6, SSD1306_WHITE);
+  } else {
+    Serial.println("Ngoài tầm đo");
+    display.setTextSize(2);
+    display.setCursor(0, 24);
+    display.print("Ngoai tam");
+  }
+  display.display();
+  delay(200);
+}
+`,
+    diagram: compose({ parts: OLED_PARTS, conns: OLED_AUTO }, {
+      parts: [{ type: 'esp32-iot-vl53l0x', id: 'tof1', top: 130, left: 250, attrs: { distance: 250 } }],
+      conns: [C('esp:D21', 'tof1:SDA', 'blue'), C('esp:D22', 'tof1:SCL', 'yellow'), C('esp:3V3', 'tof1:VIN', 'red'), C('esp:GND.2', 'tof1:GND', 'black')],
+    }),
+  },
+  {
+    id: 'max30100', name: 'MAX30100 (I2C): nhịp tim & SpO2 → OLED', category: 'Cảm biến I2C',
+    code: `// MAX30100: cảm biến nhịp tim và nồng độ oxy trong máu (SpO2) — LED đỏ + LED hồng ngoại (IR) chiếu vào ngón tay,
+// photodiode đo ánh sáng phản xạ thay đổi theo nhịp đập. Địa chỉ I2C 0x57. Thư viện: MAX30100lib (OXullo Intersecans).
+// Lưu ý:
+//  - pox.update() phải được gọi liên tục (lấy mẫu 100 Hz): không dùng delay() dài trong loop(), in kết quả theo millis().
+//  - Dòng LED IR mặc định 50 mA làm tín hiệu của nhiều module bị bão hòa → giảm còn 7,6 mA.
+//  - Cần vài nhịp đập để kết quả ổn định (nhịp tim trước, SpO2 sau).
+// Khi chạy: chọn cảm biến MAX30100, đặt/bỏ ngón tay, kéo thanh "Nhịp tim" / "SpO2".
+#include <Wire.h>
+#include "MAX30100_PulseOximeter.h"
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define REPORTING_PERIOD_MS 1000
+
+PulseOximeter pox;
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+uint32_t tsLastReport = 0;
+bool beat = false;
+
+// được thư viện gọi mỗi khi phát hiện một nhịp đập
+void onBeatDetected() {
+  Serial.println("Nhịp!");
+  beat = true;
+}
+
+void drawHeart(int x, int y, int r) {
+  display.fillCircle(x - r, y, r, SSD1306_WHITE);
+  display.fillCircle(x + r, y, r, SSD1306_WHITE);
+  display.fillTriangle(x - 2 * r, y + 1, x + 2 * r, y + 1, x, y + 2 * r + 2, SSD1306_WHITE);
+}
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) Serial.println("Không tìm thấy OLED!");
+  display.setTextColor(SSD1306_WHITE);
+  if (!pox.begin()) {
+    Serial.println("Không tìm thấy MAX30100 — kiểm tra dây nối!");
+    for (;;) delay(1000);
+  }
+  Serial.println("MAX30100 sẵn sàng — đặt ngón tay lên cảm biến");
+  pox.setIRLedCurrent(MAX30100_LED_CURR_7_6MA);   // dòng LED IR 7,6 mA
+  pox.setOnBeatDetectedCallback(onBeatDetected);
+}
+
+void loop() {
+  pox.update();   // đọc mẫu mới từ cảm biến, phát hiện nhịp
+
+  if (millis() - tsLastReport > REPORTING_PERIOD_MS) {
+    float bpm = pox.getHeartRate();
+    uint8_t spo2 = pox.getSpO2();
+    Serial.printf("Nhịp tim: %.1f bpm  SpO2: %d %%\\n", bpm, spo2);
+
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.print("MAX30100 - I2C 0x57");
+    if (bpm < 1) {
+      display.setCursor(0, 28);
+      display.print("Dat ngon tay len...");
+    } else {
+      if (beat) drawHeart(112, 24, 6); else drawHeart(112, 26, 4);
+      display.setTextSize(2);
+      display.setCursor(0, 16);
+      display.printf("%.0f bpm", bpm);
+      display.setCursor(0, 42);
+      if (spo2 > 0) display.printf("SpO2 %d%%", spo2);
+      else display.print("SpO2 --");
+    }
+    display.display();
+    beat = false;
+    tsLastReport = millis();
+  }
+}
+`,
+    diagram: compose({ parts: OLED_PARTS, conns: OLED_AUTO }, {
+      parts: [{ type: 'esp32-iot-max30100', id: 'pox1', top: 130, left: 250, attrs: { finger: 'Có', bpm: 75, spo2: 97 } }],
+      conns: [C('esp:D21', 'pox1:SDA', 'blue'), C('esp:D22', 'pox1:SCL', 'yellow'), C('esp:3V3', 'pox1:VIN', 'red'), C('esp:GND.2', 'pox1:GND', 'black')],
+    }),
+  },
+  {
+    id: 'mlx90614', name: 'MLX90614 (I2C): nhiệt kế hồng ngoại không tiếp xúc → OLED', category: 'Cảm biến I2C',
+    code: `// MLX90614: nhiệt kế hồng ngoại không tiếp xúc — đo nhiệt độ bề mặt vật thể (-70 – 380 °C) từ bức xạ hồng ngoại,
+// kèm nhiệt độ môi trường (cảm biến bên trong). Độ chính xác ±0.5 °C, địa chỉ I2C 0x5A. Thư viện: Adafruit MLX90614.
+// Khi chạy: chọn cảm biến MLX90614 và kéo thanh "Nhiệt độ vật thể" / "Nhiệt độ môi trường".
+#include <Wire.h>
+#include <Adafruit_MLX90614.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define FEVER_C 37.5   // ngưỡng cảnh báo sốt khi đo trán
+
+Adafruit_MLX90614 mlx;
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) Serial.println("Không tìm thấy OLED!");
+  display.setTextColor(SSD1306_WHITE);
+  if (!mlx.begin()) {
+    Serial.println("Không tìm thấy MLX90614 — kiểm tra dây nối!");
+    for (;;) delay(1000);
+  }
+  Serial.printf("MLX90614 sẵn sàng, hệ số phát xạ = %.2f\\n", mlx.readEmissivity());
+}
+
+void loop() {
+  double obj = mlx.readObjectTempC();
+  double amb = mlx.readAmbientTempC();
+  Serial.printf("Vật thể: %.2f °C (%.2f °F)  Môi trường: %.2f °C\\n", obj, mlx.readObjectTempF(), amb);
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print("MLX90614 - I2C 0x5A");
+  display.setCursor(0, 14);
+  display.print("Vat the:");
+  display.setTextSize(2);
+  display.setCursor(0, 26);
+  display.printf("%.1f C", obj);
+  display.setTextSize(1);
+  display.setCursor(0, 50);
+  display.printf("Moi truong: %.1f C", amb);
+  if (obj >= FEVER_C && obj < 43) {   // khoảng nhiệt độ cơ thể
+    display.fillRoundRect(96, 22, 32, 20, 3, SSD1306_WHITE);
+    display.setTextColor(SSD1306_BLACK);
+    display.setCursor(101, 29);
+    display.print("SOT!");
+    display.setTextColor(SSD1306_WHITE);
+  }
+  display.display();
+  delay(500);
+}
+`,
+    diagram: compose({ parts: OLED_PARTS, conns: OLED_AUTO }, {
+      parts: [{ type: 'esp32-iot-mlx90614', id: 'mlx1', top: 130, left: 250, attrs: { object: 36.6, ambient: 27 } }],
+      conns: [C('esp:D21', 'mlx1:SDA', 'blue'), C('esp:D22', 'mlx1:SCL', 'yellow'), C('esp:3V3', 'mlx1:VIN', 'red'), C('esp:GND.2', 'mlx1:GND', 'black')],
+    }),
+  },
+  {
     id: 'webserver-config', name: 'HTTP server: trang web cấu hình thiết bị', category: 'Kết nối',
     code: `// Web server trên ESP32 (thư viện WebServer): trang cấu hình thiết bị.
 //  - GET  /            trang HTML: trạng thái + form cấu hình
@@ -2623,6 +2957,11 @@ const CATALOG = [
   ]],
   ['Cảm biến I2C', [
     ['aht10', 'AHT10/AHT20: nhiệt độ & độ ẩm lên OLED'],
+    ['sht30-bmp280', 'SHT30 & BMP280: nhiệt độ, độ ẩm, áp suất không khí → OLED'],
+    ['bh1750', 'BH1750FVI: cường độ ánh sáng (lux) → OLED'],
+    ['vl53l0x', 'VL53L0X: đo khoảng cách bằng laser → OLED'],
+    ['max30100', 'MAX30100 (IR 7,6 mA): nhịp tim & SpO2 → OLED'],
+    ['mlx90614', 'MLX90614: nhiệt độ vật thể (hồng ngoại) → OLED'],
   ]],
   ['Kết nối', [
     ['http-get', 'HTTP GET: nhận dữ liệu thời tiết (JSON) → OLED'],

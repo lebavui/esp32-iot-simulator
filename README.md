@@ -34,7 +34,7 @@ ADC1/ADC2, chân chỉ-vào của ESP32, ADC2 của ESP32-C3 không dùng đư�
 (hoặc mở ví dụ khi đang chọn board khác) sẽ tự chuyển dây nối và số chân trong code sang board đó.
 
 **Linh kiện**: LED, LED RGB, điện trở, nút nhấn, công tắc gạt,
-biến trở, buzzer, DHT22/DHT11, DS18B20 (1-Wire, cần điện trở kéo lên 4,7 kΩ), AHT10/AHT20 (I2C), HC-SR04, PIR,
+biến trở, buzzer, DHT22/DHT11, DS18B20 (1-Wire, cần điện trở kéo lên 4,7 kΩ), AHT10/AHT20, SHT30, BMP280, BH1750, VL53L0X, MAX30100, MLX90614 (I2C), HC-SR04, PIR,
 các module cảm biến có chân AO/DO (bộ so sánh LM393): ánh sáng LDR, ánh sáng photodiode,
 lửa hồng ngoại, khí gas MQ-2 (đường đặc tuyến LPG theo datasheet), mưa, độ ẩm đất; cảm biến mực nước, module relay 1 kênh
 (kích HIGH/LOW, tiếp điểm COM/NO/NC), bóng đèn, servo, LED 7 đoạn, LCD 16x2/20x4 I2C, OLED SSD1306 128x64, dải NeoPixel,
@@ -48,7 +48,7 @@ cầu phân áp) đều có cảnh báo như ESP32 thật.
 
 **Thư viện**: Arduino core, `Serial`, `WiFi.h`, `HTTPClient.h`, `PubSubClient.h` (MQTT), `ArduinoJson.h` (v6 & v7),
 `LiquidCrystal_I2C`, `Adafruit_SSD1306`/`Adafruit_GFX`, `Adafruit_NeoPixel`, `DHT.h`, `DHTesp.h`, `ESP32Servo.h`,
-`OneWire.h` + `DallasTemperature.h`, `Adafruit_AHTX0.h`, `WebServer.h`, `Wire.h`, `Preferences.h`, `time.h` (NTP),
+`OneWire.h` + `DallasTemperature.h`, `Adafruit_AHTX0.h`, `Adafruit_SHT31.h`, `Adafruit_BMP280.h`, `BH1750.h`, `Adafruit_VL53L0X.h` / `VL53L0X.h`, `MAX30100_PulseOximeter.h`, `Adafruit_MLX90614.h`, `WebServer.h`, `Wire.h`, `Preferences.h`, `time.h` (NTP),
 FreeRTOS (`xTaskCreate`, `vTaskDelay`, hàng đợi `xQueue…`, semaphore/mutex `xSemaphore…`), LEDC v2 & v3,
 `LoRa.h` (Sandeep Mistry), `esp_now.h`, `WiFiUdp.h`, `coap-simple.h` (CoAP simple library).
 

@@ -4,6 +4,7 @@ import { parse } from './parser.js';
 import { generate, INT_TYPES } from './codegen.js';
 import { LIBS } from '../runtime/libs.js';
 import { JSON_VALUE_TYPES } from '../runtime/meta.js';
+import { I2C_SENSOR_HEADERS } from '../runtime/i2c_sensors.js';
 import { BOARDS, DEFAULT_BOARD, boardConsts } from '../boards.js';
 
 const EXTRA_TYPES = ['TaskHandle_t', 'SemaphoreHandle_t', 'QueueHandle_t', 'TimerHandle_t', 'hw_timer_t', 'portMUX_TYPE',
@@ -16,6 +17,7 @@ const SUPPORTED_HEADERS = [
   'stdlib.h', 'string.h', 'esp_system.h', 'freertos/FreeRTOS.h', 'freertos/task.h', 'esp_wifi.h', 'WiFiMulti.h', 'esp_timer.h',
   'LoRa.h', 'esp_now.h', 'esp_mac.h', 'WiFiUdp.h', 'WiFiUDP.h', 'coap-simple.h',
   'OneWire.h', 'DallasTemperature.h', 'Adafruit_AHTX0.h', 'WebServer.h', 'freertos/queue.h', 'freertos/semphr.h',
+  ...I2C_SENSOR_HEADERS,
 ];
 
 // board: part type of the microcontroller board in the diagram (its pins_arduino.h constants and target macros)
