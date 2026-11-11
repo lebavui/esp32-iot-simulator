@@ -1366,6 +1366,70 @@ void loop() {
     ]),
   },
   {
+    id: 'grove-temperature', name: 'Grove Temperature Sensor V1.2 (NTC): nhiệt độ → OLED', category: 'Cảm biến tương tự (analog)',
+    code: `// Seeed Grove - Temperature Sensor V1.2: điện trở nhiệt NTC (NCP18WF104F03RC, 100 kΩ ở 25 °C, B = 4275)
+// nối từ VCC xuống SIG, cùng điện trở 100 kΩ xuống GND (qua bộ đệm LMV358) -> nhiệt độ càng cao, SIG càng cao.
+// Từ giá trị ADC: R_NTC = R0 * (ADC_MAX / adc - 1), rồi phương trình B: 1/T = ln(R/R0)/B + 1/298.15.
+// Code mẫu của Seeed dùng 1023 (ADC 10 bit của Arduino Uno); ESP32 có ADC 12 bit nên dùng 4095.
+// Đấu nối: SIG -> GPIO34 (ADC1), VCC -> 3V3, GND -> GND. Nhiệt độ > 35 °C thì bật LED cảnh báo (GPIO5).
+// Khi chạy: chọn cảm biến, kéo "Nhiệt độ (°C)".
+#include <Wire.h>
+#include <math.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+const int PIN_TEMP = 34;         // Grove SIG
+const int PIN_LED = 5;
+const int B = 4275;              // hệ số B của NTC
+const float R0 = 100000.0;       // R0 = 100 kΩ
+const float ADC_MAX = 4095.0;
+const float T_ALARM = 35.0;
+
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+
+float readTemperature() {
+  long sum = 0;
+  for (int i = 0; i < 16; i++) sum += analogRead(PIN_TEMP);   // lấy trung bình cho ổn định
+  float a = sum / 16.0;
+  if (a < 1) a = 1;                                            // tránh chia cho 0
+  float R = R0 * (ADC_MAX / a - 1.0);                          // điện trở NTC
+  return 1.0 / (log(R / R0) / B + 1 / 298.15) - 273.15;        // Kelvin -> °C
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(PIN_LED, OUTPUT);
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("Không tìm thấy OLED SSD1306!");
+    for (;;) delay(1000);
+  }
+  display.setTextColor(SSD1306_WHITE);
+}
+
+void loop() {
+  float t = readTemperature();
+  bool hot = t > T_ALARM;
+  digitalWrite(PIN_LED, hot);
+  Serial.printf("ADC=%4d  nhiệt độ = %.1f °C%s\\n", analogRead(PIN_TEMP), t, hot ? "  ⚠ QUÁ NÓNG!" : "");
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print("Grove Temp v1.2");
+  display.setTextSize(3);
+  display.setCursor(0, 18);
+  display.printf("%.1f", t);
+  display.setTextSize(1);
+  display.print(" C");
+  display.setCursor(0, 50);
+  display.print(hot ? "CANH BAO: QUA NONG!" : "Binh thuong");
+  display.display();
+  delay(1000);
+}
+`,
+    diagram: compose(sensorLeft('esp32-iot-grove-temperature', 'gt1', { temperature: 26 }, 72, [['D34', 'SIG', 'yellow']]), { parts: OLED_PARTS, conns: OLED_AUTO }, LED_D5),
+  },
+  {
     id: 'soil-irrigation', name: '28. Độ ẩm đất (AO): tưới cây tự động', category: 'Cảm biến tương tự (analog)',
     code: `// Tưới cây tự động: đọc độ ẩm đất (AO) và bật máy bơm qua relay.
 // Đất càng ẩm -> điện áp AO càng THẤP. Dùng 2 ngưỡng (trễ / hysteresis) để bơm không bật tắt liên tục.
@@ -2949,6 +3013,7 @@ const CATALOG = [
     ['gas-analog', 'Khí gas MQ-2 (AO): đo ppm + OLED'],
     ['soil-irrigation', 'Độ ẩm đất (AO): tưới cây tự động'],
     ['water-level', 'Cảm biến mực nước (AO): báo mức bồn'],
+    ['grove-temperature', 'Grove Temperature Sensor V1.2 (NTC): nhiệt độ → OLED'],
     ['ultrasonic', 'Cảm biến siêu âm HC-SR04: đo khoảng cách + còi'],
   ]],
   ['Cảm biến 1 dây (OneWire)', [

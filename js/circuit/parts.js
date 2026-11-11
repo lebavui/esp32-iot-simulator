@@ -587,6 +587,32 @@ export const PARTS = {
       w.setAttribute('height', hgt.toFixed(1));
     },
   },
+  // Seeed Grove - Temperature Sensor V1.2: NTC thermistor NCP18WF104F03RC (R0 = 100 kΩ at 25 °C, B = 4275) from VCC to
+  // SIG with 100 kΩ to GND, buffered by an LMV358 follower → SIG = VCC·100k / (100k + R_NTC). Grove order: SIG NC VCC GND
+  'esp32-iot-grove-temperature': {
+    label: 'Grove Temperature Sensor V1.2 (NTC)', category: 'Cảm biến', power: ['VCC', 'GND'], analog: ['SIG'],
+    attrs: [{ key: 'temperature', label: 'Nhiệt độ (°C)', type: 'range', min: -40, max: 125, step: 0.1, default: 25, live: true }],
+    size: () => ({ w: 72, h: 44 }),
+    pins: () => ['SIG', 'NC', 'VCC', 'GND'].map((name, i) => ({ name, x: 70, y: 10 + i * 8 })),
+    render() {
+      const cols = ['#f2c200', '#eee', '#e22', '#222'];
+      return `<rect x="0" y="0" width="56" height="44" rx="3" fill="#2d8a3e"/>
+      <circle cx="6" cy="6" r="2.6" fill="#e9eef2"/><circle cx="6" cy="38" r="2.6" fill="#e9eef2"/>
+      <rect x="44" y="5" width="12" height="34" rx="1" fill="#f4f4f4" stroke="#bbb"/>
+      ${['SIG', 'NC', 'VCC', 'GND'].map((n, i) => `<line x1="54" y1="${10 + i * 8}" x2="72" y2="${10 + i * 8}" stroke="${cols[i]}" stroke-width="2"/><text x="42" y="${12 + i * 8}" text-anchor="end" font-size="4.2" fill="#fff">${n}</text>`).join('')}
+      <rect x="12" y="11" width="6" height="3.5" fill="#c9a36b" stroke="#7a5a2a" stroke-width="0.4"/>
+      <text x="15" y="20" text-anchor="middle" font-size="3.6" fill="#fff">NTC</text>
+      <rect x="11" y="24" width="10" height="7" rx="0.6" fill="#222"/><text x="16" y="35.5" text-anchor="middle" font-size="3" fill="#cfe8d4">LMV358</text>
+      <text x="28" y="9" text-anchor="middle" font-size="4" fill="#fff" font-weight="bold">Grove</text>
+      <text x="22" y="42" text-anchor="middle" font-size="3.6" fill="#fff">Temp v1.2</text>`;
+    },
+    drive(part, api) {
+      if (!api.powered(part)) return [];
+      const T = num(part.attrs.temperature, 25) + 273.15;
+      const rNtc = 100000 * Math.exp(4275 * (1 / T - 1 / 298.15));
+      return [{ pin: 'SIG', v: (api.V('VCC') * 100000) / (100000 + rNtc) }];
+    },
+  },
 
   // ---------------------------------------------------------------- actuators / displays
   'esp32-iot-servo': {
