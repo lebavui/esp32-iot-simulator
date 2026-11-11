@@ -16,7 +16,7 @@ const SUPPORTED_HEADERS = [
   'Adafruit_NeoPixel.h', 'Preferences.h', 'time.h', 'WiFiClient.h', 'WiFiClientSecure.h', 'SPI.h', 'math.h', 'stdio.h',
   'stdlib.h', 'string.h', 'esp_system.h', 'freertos/FreeRTOS.h', 'freertos/task.h', 'esp_wifi.h', 'WiFiMulti.h', 'esp_timer.h',
   'LoRa.h', 'esp_now.h', 'esp_mac.h', 'WiFiUdp.h', 'WiFiUDP.h', 'coap-simple.h',
-  'OneWire.h', 'DallasTemperature.h', 'Adafruit_AHTX0.h', 'WebServer.h', 'freertos/queue.h', 'freertos/semphr.h',
+  'OneWire.h', 'DallasTemperature.h', 'rgb_lcd.h', 'Adafruit_AHTX0.h', 'WebServer.h', 'freertos/queue.h', 'freertos/semphr.h',
   ...I2C_SENSOR_HEADERS,
 ];
 
@@ -28,6 +28,12 @@ export function compile(source, { board = DEFAULT_BOARD } = {}) {
   const hasLed = b.consts ? b.consts.LED_BUILTIN != null : true;
   const defines = b.defines.map((d) => `#define ${d} 1\n`).join('') + (hasLed ? '#define LED_BUILTIN LED_BUILTIN\n' : '');
   const { tokens, includes } = preprocessAndTokenize(source, defines);
+  const incs = new Set(includes.map((i) => i.name));
+  if (incs.has('rgb_lcd.h')) {
+    // rgb_lcd.h's own #defines (its WHITE/RED/GREEN/BLUE colour numbers, unless Adafruit GFX's WHITE is in use)
+    Object.assign(consts, { REG_RED: [4, 'int'], REG_GREEN: [3, 'int'], REG_BLUE: [2, 'int'], LCD_5x8DOTS: [0, 'int'], LCD_5x10DOTS: [4, 'int'] });
+    if (!incs.has('Adafruit_GFX.h') && !incs.has('Adafruit_SSD1306.h')) Object.assign(consts, { WHITE: [0, 'int'], RED: [1, 'int'], GREEN: [2, 'int'], BLUE: [3, 'int'] });
+  }
   const ast = parse(tokens, [...Object.keys(LIBS), ...JSON_VALUE_TYPES, ...EXTRA_TYPES, ...INT_TYPES]);
   const { code, warnings } = generate(ast, LIBS, consts);
   for (const inc of includes) {

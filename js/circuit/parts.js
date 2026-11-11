@@ -29,6 +29,49 @@ const rowPins = (names, x0, dx, y) => names.map((n, i) => ({ name: n, x: x0 + i 
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 
+const GROVE_LCD_MODELS = ['RGB Backlight v4.0', 'RGB Backlight v5.0', 'White on Blue', 'Black on Yellow', 'Black on Red'];
+
+// HD44780 character LCD on a canvas (scale 3): st = LiquidCrystal state (ddram/cgram/addr/cursor/blink/shift),
+// colors { bg, on (lit pixel), off (unlit pixel) }, pad = margin (in LCD units) around the character grid
+function drawCharLcd(ctx2d, st, cols, rows, powered, colors, pad = 4) {
+  const S = 3;
+  ctx2d.fillStyle = colors.bg;
+  ctx2d.fillRect(0, 0, ctx2d.canvas.width, ctx2d.canvas.height);
+  const off = [0x00, 0x40, 0x14, 0x54];
+  const blinkOn = Math.floor(Date.now() / 500) % 2 === 0;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      let code = 0x20;
+      let isCursor = false;
+      if (powered && st && st.on) {
+        const base = off[r];
+        const lineStart = base >= 0x40 ? 0x40 : 0x00;
+        const col = (((base - lineStart) + c + (st.shift || 0)) % 40);
+        const addr = lineStart + col;
+        code = st.ddram[addr];
+        isCursor = addr === st.addr;
+      }
+      const x0 = (pad + c * 12) * S, y0 = (pad + r * 19) * S;
+      let rowsBits;
+      if (code < 16) rowsBits = Array.from(st ? st.cgram[code & 7] : new Uint8Array(8));
+      else {
+        const g = glyph(code, 'lcd');
+        rowsBits = [];
+        for (let y = 0; y < 8; y++) { let b = 0; for (let x = 0; x < 5; x++) if ((g[x] >> y) & 1) b |= 1 << (4 - x); rowsBits.push(b); }
+      }
+      for (let y = 0; y < 8; y++) {
+        let bits = rowsBits[y] || 0;
+        if (isCursor && st.cursor && y === 7) bits = 0x1f;
+        if (isCursor && st.blink && blinkOn) bits = 0x1f;
+        for (let x = 0; x < 5; x++) {
+          ctx2d.fillStyle = (bits >> (4 - x)) & 1 ? colors.on : colors.off;
+          ctx2d.fillRect(x0 + x * 2 * S + S * 0.15, y0 + y * 2 * S + S * 0.15, 2 * S - S * 0.3, 2 * S - S * 0.3);
+        }
+      }
+    }
+  }
+}
+
 // I2C sensor breakout board (60×56, like the AHT10): `kind` is the i2c kind the library looks up, `addrs` the
 // selectable addresses (first = default), `chip` the SVG of the sensor in the upper half
 function i2cModule({ label, kind, color, title, addrs, attrs, chip, pins = ['VIN', 'GND', 'SCL', 'SDA'] }) {
@@ -747,47 +790,51 @@ export const PARTS = {
     draw(part, ctx2d, powered) {
       const [cols, rows] = (part.attrs.size || '16x2').split('x').map(Number);
       const blue = part.attrs.color === 'blue';
+      const lit = powered && part.state && part.state.backlight;
+      drawCharLcd(ctx2d, part.state, cols, rows, powered, {
+        bg: blue ? (lit ? '#2f5cff' : '#0e1f6b') : (lit ? '#9fd341' : '#4d6b1c'),
+        on: blue ? '#e8f0ff' : '#1d2a0a',
+        off: blue ? (lit ? '#3a68ff' : '#13267a') : (lit ? '#93c63b' : '#4a6619'),
+      });
+    },
+  },
+  // Seeed Grove - LCD RGB Backlight (v4.0: LCD 0x3E + RGB PCA9633 0x62; v5.0: RGB at 0x30) and Grove - 16x2 LCD
+  // (JHD1802, LCD 0x3E only, fixed backlight colour). Library rgb_lcd.h. Grove connector: SCL SDA VCC GND
+  'esp32-iot-grove-lcd-rgb': {
+    label: 'Grove LCD 16x2 (Seeed, I2C)', category: 'Hiển thị', power: ['VCC', 'GND'], i2c: 'grove-lcd',
+    attrs: [{ key: 'model', label: 'Loại', type: 'select', options: GROVE_LCD_MODELS, default: GROVE_LCD_MODELS[0] }],
+    i2cAddrs(part) {
+      const m = part.attrs.model || GROVE_LCD_MODELS[0];
+      return m === 'RGB Backlight v4.0' ? [0x3e, 0x62] : m === 'RGB Backlight v5.0' ? [0x3e, 0x30] : [0x3e];
+    },
+    size: () => ({ w: 256, h: 88 }),
+    pins: () => ['SCL', 'SDA', 'VCC', 'GND'].map((name, i) => ({ name, x: 2, y: 29 + i * 10 })),
+    render(part) {
+      const cols = ['#f2c200', '#eee', '#e22', '#222'];
+      const m = part.attrs.model || GROVE_LCD_MODELS[0];
+      return `<rect x="14" y="0" width="242" height="88" rx="3" fill="#2d8a3e"/>
+      ${[[20, 6], [250, 6], [20, 82], [250, 82]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="2.8" fill="#e9eef2"/>`).join('')}
+      <rect x="10" y="22" width="14" height="44" rx="1" fill="#f4f4f4" stroke="#bbb"/>
+      ${['SCL', 'SDA', 'VCC', 'GND'].map((n, i) => `<line x1="0" y1="${29 + i * 10}" x2="18" y2="${29 + i * 10}" stroke="${cols[i]}" stroke-width="2"/><text x="27" y="${31 + i * 10}" font-size="4.6" fill="#fff">${n}</text>`).join('')}
+      <rect x="40" y="10" width="208" height="68" rx="2" fill="#111"/>
+      <text x="144" y="7" text-anchor="middle" font-size="4.4" fill="#fff" font-weight="bold">Grove - ${esc(m.startsWith('RGB') ? 'LCD ' + m : '16x2 LCD (' + m + ')')}</text>`;
+    },
+    canvas: () => ({ x: 42, y: 19, w: 204, h: 50, scale: 3 }),
+    draw(part, ctx2d, powered) {
+      const m = part.attrs.model || GROVE_LCD_MODELS[0];
       const st = part.state;
-      const lit = powered && st && st.backlight;
-      const bg = blue ? (lit ? '#2f5cff' : '#0e1f6b') : (lit ? '#9fd341' : '#4d6b1c');
-      const on = blue ? '#e8f0ff' : '#1d2a0a';
-      const offPix = blue ? (lit ? '#3a68ff' : '#13267a') : (lit ? '#93c63b' : '#4a6619');
-      const S = 3;
-      ctx2d.fillStyle = bg;
-      ctx2d.fillRect(0, 0, ctx2d.canvas.width, ctx2d.canvas.height);
-      const off = [0x00, 0x40, 0x14, 0x54];
-      const blinkOn = Math.floor(Date.now() / 500) % 2 === 0;
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          let code = 0x20;
-          let isCursor = false;
-          if (powered && st && st.on) {
-            const base = off[r];
-            const lineStart = base >= 0x40 ? 0x40 : 0x00;
-            const col = (((base - lineStart) + c + (st.shift || 0)) % 40);
-            const addr = lineStart + col;
-            code = st.ddram[addr];
-            isCursor = addr === st.addr;
-          }
-          const x0 = (4 + c * 12) * S, y0 = (4 + r * 19) * S;
-          let rowsBits;
-          if (code < 16) rowsBits = Array.from(st ? st.cgram[code & 7] : new Uint8Array(8));
-          else {
-            const g = glyph(code, 'lcd');
-            rowsBits = [];
-            for (let y = 0; y < 8; y++) { let b = 0; for (let x = 0; x < 5; x++) if ((g[x] >> y) & 1) b |= 1 << (4 - x); rowsBits.push(b); }
-          }
-          for (let y = 0; y < 8; y++) {
-            let bits = rowsBits[y] || 0;
-            if (isCursor && st.cursor && y === 7) bits = 0x1f;
-            if (isCursor && st.blink && blinkOn) bits = 0x1f;
-            for (let x = 0; x < 5; x++) {
-              ctx2d.fillStyle = (bits >> (4 - x)) & 1 ? on : offPix;
-              ctx2d.fillRect(x0 + x * 2 * S + S * 0.15, y0 + y * 2 * S + S * 0.15, 2 * S - S * 0.3, 2 * S - S * 0.3);
-            }
-          }
-        }
-      }
+      let col;
+      if (m.startsWith('RGB')) {
+        // backlight = PCA9633 PWM outputs; the hardware blink (blinkLED) gates it at 1 Hz, 50 %
+        const blinkOff = st && st.ledBlink && Math.floor(Date.now() / 500) % 2 === 1;
+        const rgb = powered && st && st.rgb && !blinkOff ? st.rgb : [0, 0, 0];
+        col = rgb.map((c) => Math.round(30 + c * 0.86));
+      } else col = { 'White on Blue': [47, 92, 255], 'Black on Yellow': [232, 208, 58], 'Black on Red': [226, 59, 43] }[m].map((c) => (powered ? c : Math.round(c * 0.3)));
+      const hex = (c) => '#' + c.map((v) => v.toString(16).padStart(2, '0')).join('');
+      const dim = (c, k) => c.map((v) => Math.round(v * k));
+      drawCharLcd(ctx2d, st, 16, 2, powered, {
+        bg: hex(col), off: hex(dim(col, 0.93)), on: m === 'White on Blue' ? '#e8f0ff' : hex(dim(col, 0.18)),
+      }, 6);
     },
   },
   'esp32-iot-ssd1306': {

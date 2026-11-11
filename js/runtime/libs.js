@@ -950,6 +950,50 @@ export class LiquidCrystal_I2C extends Print {
 }
 LiquidCrystal_I2C.meta = { ret: { ...Print.meta.ret } };
 
+// ---------------------------------------------------------------- Seeed Grove LCD (rgb_lcd.h)
+// Grove - LCD RGB Backlight (LCD controller 0x3E + RGB driver PCA9633 at 0x62, or 0x30 on v5.0) and Grove - 16x2 LCD
+// (0x3E only): the HD44780 part reuses LiquidCrystal_I2C; begin() turns the backlight white like the library.
+const GROVE_COLORS = [[255, 255, 255], [255, 0, 0], [0, 255, 0], [0, 0, 255]];   // WHITE RED GREEN BLUE
+export class rgb_lcd extends LiquidCrystal_I2C {
+  constructor(R) {
+    super(R, 0x3e, 16, 2);
+    Object.assign(this.s, { backlight: true, rgb: [0, 0, 0], ledBlink: false });
+    this.rgbAddr = 0x62;
+  }
+  $attach() {
+    this.part = this.R.sim.findI2C('grove-lcd', 0x3e);
+    if (this.part) this.part.state = this.s;
+    else this.R.warnOnce('grove-lcd', `Grove LCD (địa chỉ 0x3E) không tìm thấy (kiểm tra dây SDA→GPIO${this.R.i2c.sda}, SCL→GPIO${this.R.i2c.scl}, VCC, GND).`);
+  }
+  begin(cols, rows) {
+    super.begin(cols, rows);
+    // like the library: the v5.0 board answers at 0x30, otherwise the v4.0 address 0x62 is used
+    this.rgbAddr = this.R.sim.findI2C('grove-lcd', 0x30) ? 0x30 : 0x62;
+    this.s.ledBlink = false;
+    this.setColorWhite();
+  }
+  init() { this.begin(); }
+  setRGB(r, g, b) { this.s.rgb = [r & 255, g & 255, b & 255]; this.$touch(); }
+  // setPWM(REG_RED|REG_GREEN|REG_BLUE, pwm): one channel (v4.0 PCA9633 registers 4/3/2)
+  setPWM(reg, pwm) {
+    const i = { 4: 0, 3: 1, 2: 2 }[reg];
+    if (i === undefined) return;
+    this.s.rgb = this.s.rgb.slice();
+    this.s.rgb[i] = pwm & 255;
+    this.$touch();
+  }
+  setColor(c) { const rgb = GROVE_COLORS[c]; if (rgb) this.setRGB(...rgb); }
+  setColorAll() { this.setRGB(0, 0, 0); }
+  setColorWhite() { this.setRGB(255, 255, 255); }
+  blinkLED() { this.s.ledBlink = true; this.$touch(); }
+  noBlinkLED() { this.s.ledBlink = false; this.$touch(); }
+  backlight() {}
+  noBacklight() {}
+  setBacklight() {}
+  command() {}
+}
+rgb_lcd.meta = { ret: { ...Print.meta.ret } };
+
 // ---------------------------------------------------------------- SSD1306 OLED + Adafruit GFX
 export class Adafruit_SSD1306 extends Print {
   constructor(R, w, h) {
@@ -1159,6 +1203,6 @@ export const LIBS = {
   JsonDocument, StaticJsonDocument, DynamicJsonDocument, DeserializationError,
   tm: TmStruct, TwoWire, EspClass, Preferences,
   DHT, DHTesp, TempAndHumidity, Servo, ESP32PWM, OneWire, DallasTemperature, Adafruit_AHTX0, sensors_event_t,
-  LiquidCrystal_I2C, Adafruit_SSD1306, Adafruit_NeoPixel,
+  LiquidCrystal_I2C, rgb_lcd, Adafruit_SSD1306, Adafruit_NeoPixel,
   ...I2C_SENSOR_LIBS, ...RADIO_LIBS,
 };

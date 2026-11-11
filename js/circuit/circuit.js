@@ -142,7 +142,7 @@ export class Circuit {
     return this.parts.find((p) => {
       const d = PARTS[p.type];
       if (!d.i2c || (kind && d.i2c !== kind)) return false;
-      if (parseInt(p.attrs.address, 16) !== addr) return false;
+      if (!(d.i2cAddrs ? d.i2cAddrs(p) : [parseInt(p.attrs.address, 16)]).includes(addr)) return false;
       return sdaNet != null && sclNet != null && this.net(p, 'SDA') === sdaNet && this.net(p, 'SCL') === sclNet && this.isPowered(p);
     }) || null;
   }

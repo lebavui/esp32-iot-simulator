@@ -463,7 +463,7 @@ function frame() {
     if (def.draw && part.canvas) {
       const powered = running && circuit.isPowered(part);
       const st = part.state;
-      const wantsBlink = st && (st.blink) && blink !== lastBlink;
+      const wantsBlink = st && (st.blink || st.ledBlink) && blink !== lastBlink;
       if (part.drawKey !== powered || (st && st.dirty) || wantsBlink || part.drawnState !== st) {
         def.draw(part, part.canvas.getContext('2d'), powered);
         part.drawKey = powered;

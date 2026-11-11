@@ -33,14 +33,14 @@ for (const ex of EXAMPLES) {
   await new Promise((r) => setTimeout(r, ms));
   clearInterval(iv);
   // poke inputs for some examples
-  const lcd = parts.find((p) => p.type === 'esp32-iot-lcd1602');
+  const lcd = parts.find((p) => p.type === 'esp32-iot-lcd1602' || p.type === 'esp32-iot-grove-lcd-rgb');
   R.stop();
   await pr;
   console.log('=== ' + ex.id);
   console.log(binToUtf8(out).split('\n').slice(0, 6).join('\n'));
   if (logs.length) console.log('LOGS:', logs.slice(0, 5).join(' || '));
   console.log('SNAP:', [...new Set(snaps)].slice(0, 4).join(' | '));
-  if (lcd && lcd.state) console.log('LCD:', [0, 0x40].map((a) => String.fromCharCode(...lcd.state.ddram.slice(a, a + 16))).join(' / '));
+  if (lcd && lcd.state) console.log('LCD:', [0, 0x40].map((a) => String.fromCharCode(...lcd.state.ddram.slice(a, a + 16))).join(' / ') + (lcd.state.rgb ? ' RGB=' + lcd.state.rgb + (lcd.state.ledBlink ? ' blink' : '') : ''));
   const oled = parts.find((p) => p.type === 'esp32-iot-ssd1306');
   if (oled) console.log('OLED pixels on:', oled.state ? oled.state.fb.reduce((a, b) => a + b, 0) : 'no state');
   const strip = parts.find((p) => p.type === 'esp32-iot-neopixel-strip');

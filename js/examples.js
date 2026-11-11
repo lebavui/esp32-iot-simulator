@@ -1430,6 +1430,111 @@ void loop() {
     diagram: compose(sensorLeft('esp32-iot-grove-temperature', 'gt1', { temperature: 26 }, 72, [['D34', 'SIG', 'yellow']]), { parts: OLED_PARTS, conns: OLED_AUTO }, LED_D5),
   },
   {
+    id: 'grove-lcd-rgb', name: 'Grove LCD RGB Backlight (Seeed): nhiệt độ, màu nền theo nhiệt độ', category: 'Hiển thị',
+    code: `// Seeed Grove - LCD RGB Backlight, thư viện rgb_lcd của Seeed: LCD 16x2 (HD44780) ở địa chỉ I2C 0x3E,
+// đèn nền RGB do chip PCA9633 điều khiển (0x62; bản v5.0 ở 0x30) -> lcd.setRGB(r, g, b) đổi màu nền.
+// Đọc nhiệt độ từ Grove Temperature Sensor V1.2 rồi hiện lên LCD; màu nền chuyển dần
+// xanh dương (lạnh) -> xanh lá -> đỏ (nóng), trên 35 °C đèn nền nhấp nháy (blinkLED) để cảnh báo.
+// Đấu nối (cáp Grove): LCD SDA -> GPIO21, SCL -> GPIO22, VCC -> 3V3, GND -> GND; cảm biến SIG -> GPIO34.
+// Khi chạy: chọn cảm biến, kéo "Nhiệt độ (°C)". Chọn LCD để đổi loại: RGB v4.0/v5.0 hoặc Grove 16x2 một màu
+// (trắng/xanh dương, đen/vàng, đen/đỏ — cùng thư viện, setRGB() không có tác dụng).
+#include <Wire.h>
+#include <math.h>
+#include "rgb_lcd.h"
+
+rgb_lcd lcd;
+
+const int PIN_TEMP = 34;         // Grove Temperature SIG
+const int B = 4275;              // hệ số B của NTC
+const float R0 = 100000.0;       // R0 = 100 kΩ
+const float T_COLD = 15.0;       // xanh dương hoàn toàn
+const float T_HOT = 35.0;        // đỏ hoàn toàn, trên mức này thì nhấp nháy
+
+// ký tự tự tạo: nhiệt kế
+byte thermo[8] = {0b00100, 0b01010, 0b01010, 0b01110, 0b01110, 0b11111, 0b11111, 0b01110};
+
+int red, green, blue;
+
+float readTemperature() {
+  long sum = 0;
+  for (int i = 0; i < 16; i++) sum += analogRead(PIN_TEMP);
+  float a = sum / 16.0;
+  if (a < 1) a = 1;
+  float R = R0 * (4095.0 / a - 1.0);
+  return 1.0 / (log(R / R0) / B + 1 / 298.15) - 273.15;
+}
+
+// 15 °C -> (0, 0, 255), 25 °C -> (0, 255, 0), 35 °C -> (255, 0, 0)
+void setColorByTemp(float t) {
+  float k = constrain((t - T_COLD) / (T_HOT - T_COLD), 0.0, 1.0);
+  if (k < 0.5) {
+    red = 0;
+    green = 255 * k * 2;
+    blue = 255 - green;
+  } else {
+    red = 255 * (k - 0.5) * 2;
+    green = 255 - red;
+    blue = 0;
+  }
+  lcd.setRGB(red, green, blue);
+}
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  Serial.println("Quét I2C (LCD: 0x3E, RGB: 0x62 hoặc 0x30)...");
+  for (byte addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) Serial.printf("  Thiết bị ở 0x%02X\\n", addr);
+  }
+
+  lcd.begin(16, 2);              // nền trắng sau khi khởi tạo
+  lcd.createChar(0, thermo);
+  lcd.print("Grove LCD RGB");
+  lcd.setCursor(0, 1);
+  lcd.print("Seeed rgb_lcd");
+
+  // thử các màu có sẵn: RED, GREEN, BLUE rồi WHITE
+  for (int c = RED; c <= BLUE; c++) {
+    lcd.setColor(c);
+    delay(400);
+  }
+  lcd.setColorWhite();
+  delay(400);
+  lcd.clear();
+}
+
+void loop() {
+  float t = readTemperature();
+  bool hot = t > T_HOT;
+  setColorByTemp(t);
+  if (hot) lcd.blinkLED(); else lcd.noBlinkLED();
+
+  // dòng 1: biểu tượng nhiệt kế + nhiệt độ + ký tự độ (0xDF trong bảng mã HD44780)
+  char buf[17];
+  lcd.setCursor(0, 0);
+  lcd.write((byte)0);
+  snprintf(buf, sizeof(buf), " %6.1f", t);
+  lcd.print(buf);
+  lcd.write(0xDF);
+  lcd.print("C      ");
+
+  // dòng 2: trạng thái
+  const char *status = t < 20 ? "Mat me" : (hot ? "QUA NONG!" : "De chiu");
+  snprintf(buf, sizeof(buf), "%-16s", status);
+  lcd.setCursor(0, 1);
+  lcd.print(buf);
+
+  Serial.printf("Nhiệt độ = %.1f °C, nền RGB = (%d, %d, %d)%s\\n", t, red, green, blue, hot ? "  ⚠ nhấp nháy" : "");
+  delay(500);
+}
+`,
+    diagram: compose(sensorLeft('esp32-iot-grove-temperature', 'gt1', { temperature: 22 }, 72, [['D34', 'SIG', 'yellow']]), {
+      parts: [{ type: 'esp32-iot-grove-lcd-rgb', id: 'lcd1', top: -110, left: 190, attrs: { model: 'RGB Backlight v4.0' } }],
+      conns: [C('esp:D22', 'lcd1:SCL', 'yellow'), C('esp:D21', 'lcd1:SDA', 'white'), C('esp:3V3', 'lcd1:VCC', 'red'), C('esp:GND.2', 'lcd1:GND', 'black')],
+    }),
+  },
+  {
     id: 'soil-irrigation', name: '28. Độ ẩm đất (AO): tưới cây tự động', category: 'Cảm biến tương tự (analog)',
     code: `// Tưới cây tự động: đọc độ ẩm đất (AO) và bật máy bơm qua relay.
 // Đất càng ẩm -> điện áp AO càng THẤP. Dùng 2 ngưỡng (trễ / hysteresis) để bơm không bật tắt liên tục.
@@ -2998,6 +3103,7 @@ const CATALOG = [
     ['blink', 'Nhấp nháy LED'],
     ['button', 'Nút nhấn điều khiển LED'],
     ['lcd-i2c', 'LCD 16x2 I2C: chữ chạy & ký tự tự tạo'],
+    ['grove-lcd-rgb', 'Grove LCD RGB Backlight (Seeed): màu nền theo nhiệt độ'],
     ['oled', 'OLED SSD1306 I2C: đồ họa'],
   ]],
   ['Cảm biến số (digital)', [

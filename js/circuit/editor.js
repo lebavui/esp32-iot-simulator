@@ -6,7 +6,7 @@ const ID_PREFIX = {
   'esp32-iot-esp32-devkit-v1': 'esp', 'esp32-iot-led': 'led', 'esp32-iot-resistor': 'r', 'esp32-iot-pushbutton': 'btn',
   'esp32-iot-slide-switch': 'sw', 'esp32-iot-potentiometer': 'pot', 'esp32-iot-rgb-led': 'rgb', 'esp32-iot-buzzer': 'bz',
   'esp32-iot-photoresistor-sensor': 'ldr', 'esp32-iot-dht22': 'dht', 'esp32-iot-dht11': 'dht', 'esp32-iot-hc-sr04': 'ultrasonic',
-  'esp32-iot-pir-motion-sensor': 'pir', 'esp32-iot-servo': 'servo', 'esp32-iot-7segment': 'sevseg', 'esp32-iot-lcd1602': 'lcd',
+  'esp32-iot-pir-motion-sensor': 'pir', 'esp32-iot-servo': 'servo', 'esp32-iot-7segment': 'sevseg', 'esp32-iot-lcd1602': 'lcd', 'esp32-iot-grove-lcd-rgb': 'lcd',
   'esp32-iot-ssd1306': 'oled', 'esp32-iot-neopixel-strip': 'strip',
 };
 export const WIRE_COLORS = ['green', 'red', 'black', 'blue', 'yellow', 'orange', 'purple', 'gray', 'white', 'brown', 'cyan', 'magenta'];
