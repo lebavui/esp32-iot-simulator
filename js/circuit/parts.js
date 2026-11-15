@@ -126,12 +126,13 @@ function comparatorModule({ label, attrs, sense, element = '', pw = 0, ph = 38, 
 
 // ---------------------------------------------------------------- microcontroller boards (pin maps in boards.js)
 // Common behaviour: power pins, the on-board LED (drawn from the GPIO state, so it also works for LEDs that are not
-// on the header) and the BOOT button, which shorts its GPIO to GND while pressed (click the board while running).
+// on the header) and the BOOT button, which shorts its GPIO to GND while pressed (click the board while running; when
+// the button is not on the header, circuit.js offHeaderBoot() reads it).
 function boardBehaviour(type) {
   const B = BOARDS[type];
   const bootPin = B.boot && Object.keys(B.gpio).find((n) => B.gpio[n] === B.boot.gpio);
   return {
-    label: B.label, category: 'Vi điều khiển', unique: true, board: true, interactive: !!bootPin,
+    label: B.label, category: 'Vi điều khiển', unique: true, board: true, interactive: !!B.boot,
     drive(part, api) { return api.running ? Object.entries(B.power).map(([pin, v]) => ({ pin, v })) : []; },
     links: bootPin ? (part) => (part.pressed ? [[bootPin, 'GND', 0]] : []) : undefined,
     update(part, ctx) {
@@ -151,7 +152,7 @@ function boardBehaviour(type) {
   };
 }
 
-// Small boards with two castellated headers (XIAO, SuperMini): pins at x=8 / w-8, from y=26 every 12 px
+// Small boards with two castellated headers (XIAO): pins at x=8 / w-8, from y=26 every 12 px
 function smallBoard(type, { w, h, pcb, title, sub, shield, antenna, leds }) {
   const B = BOARDS[type];
   const xr = w - 8;
@@ -222,13 +223,9 @@ export const PARTS = {
     },
   },
   'board-xiao-esp32-c3': smallBoard('board-xiao-esp32-c3', { w: 92, h: 110, pcb: '#1d1f24', title: 'XIAO', sub: 'ESP32-C3', shield: 'ESP32-C3' }),
-  'board-xiao-esp32-s3': smallBoard('board-xiao-esp32-s3', {
-    w: 92, h: 110, pcb: '#1d1f24', title: 'XIAO', sub: 'ESP32-S3', shield: 'ESP32-S3',
+  'board-xiao-esp32-c6': smallBoard('board-xiao-esp32-c6', {
+    w: 92, h: 110, pcb: '#1d1f24', title: 'XIAO', sub: 'ESP32-C6', shield: 'ESP32-C6',
     leds: [{ x: 40, y: 19, on: '#ffb020', off: '#5a4410', text: 'L', textRight: true }],
-  }),
-  'board-esp32-c3-supermini': smallBoard('board-esp32-c3-supermini', {
-    w: 92, h: 136, pcb: '#23262c', title: 'C3 SuperMini', sub: 'ESP32-C3', antenna: true,
-    leds: [{ x: 30, y: 28, pwr: true, off: '#600', text: 'PWR' }, { x: 56, y: 28, on: '#3d8bff', off: '#13233f', text: 'IO8' }],
   }),
 
   // ---------------------------------------------------------------- passive / basic

@@ -11,3 +11,4 @@ docker-compose.yml
 Thumbs.db
 .env
 .env.example
+data

@@ -36,6 +36,13 @@ export class Circuit {
     for (const [name, g] of Object.entries(this.boardGpio())) if (g === gpio) return name;
     return null;
   }
+  // a BOOT button that is not on the header (pulled up on the board, to GND while the board is pressed): its voltage
+  offHeaderBoot(gpio) {
+    const b = this.board();
+    const boot = b && BOARDS[b.type].boot;
+    if (!boot || boot.gpio !== gpio || this.boardPinOfGpio(gpio)) return null;
+    return b.pressed ? 0 : 3.3;
+  }
 
   // ---------------- runtime interface ----------------
   start() {
@@ -91,7 +98,7 @@ export class Circuit {
     this.ensure();
     const name = this.boardPinOfGpio(pin);
     const b = this.board();
-    if (!name || !b) return null;
+    if (!name || !b) return this.offHeaderBoot(pin);
     return this.V(b, name);
   }
   digitalRead(pin) {
@@ -342,6 +349,15 @@ export class Circuit {
         const prev = this.levels.get(gp);
         this.levels.set(gp, lvl);
         if (prev !== undefined && prev !== lvl && this.onLevelChange) this.onLevelChange(gp, lvl, prev);
+      }
+      const boot = BOARDS[b.type].boot;
+      const bv = boot && this.offHeaderBoot(boot.gpio);
+      if (bv != null) {
+        const g = this.gpios.get(boot.gpio);
+        const lvl = g && g.mode & 2 ? (g.out ? 1 : 0) : bv > 1.65 ? 1 : 0;
+        const prev = this.levels.get(boot.gpio);
+        this.levels.set(boot.gpio, lvl);
+        if (prev !== undefined && prev !== lvl && this.onLevelChange) this.onLevelChange(boot.gpio, lvl, prev);
       }
     }
   }

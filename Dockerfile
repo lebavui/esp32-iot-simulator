@@ -2,6 +2,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 COPY --chown=node:node . .
+# Link chia sẻ được lưu ở /app/data (gắn volume trong docker-compose.yml để không mất khi cập nhật image)
+RUN mkdir -p /app/data/share && chown -R node:node /app/data
 
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \

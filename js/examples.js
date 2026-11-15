@@ -448,7 +448,7 @@ void loop() {
     code: `// Đo khoảng cách bằng HC-SR04, còi kêu khi vật cản < 30 cm
 const int TRIG = 18;
 const int ECHO = 5;
-const int BUZZER = 4;      // buzzer nối sẵn trên kit: GPIO4 (DevKit), D3 (board mở rộng XIAO), A3 (C3 SuperMini)
+const int BUZZER = 4;      // buzzer nối sẵn trên kit: GPIO4 (DevKit), D3 (board mở rộng XIAO)
 
 void setup() {
   Serial.begin(115200);
@@ -622,155 +622,123 @@ void loop() {
     ]),
   },
   {
-    id: 'http-get', name: '13. WiFi + HTTP GET thời tiết (JSON) → OLED', category: 'IoT',
-    code: `#include <WiFi.h>
+    id: 'http-get', name: '13. HTTP GET: điều khiển LED từ ThingsBoard', category: 'IoT',
+    code: `// Mỗi 1 giây gửi HTTP GET tới ThingsBoard Cloud để đọc trạng thái LED (shared attribute "led-state"),
+// rồi bật/tắt LED theo giá trị nhận được.
+// Trên thingsboard.cloud: tạo device, copy Access token vào TOKEN, thêm Shared attribute "led-state" kiểu Boolean.
+#include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 
 const char* ssid = "ESP32-IoT-GUEST";
 const char* password = "";
-// Open-Meteo: API miễn phí, không cần khóa (Hà Nội)
-const char* url = "https://api.open-meteo.com/v1/forecast?latitude=21.03&longitude=105.85&current_weather=true";
-
-Adafruit_SSD1306 display(128, 64, &Wire, -1);
-
-void showMessage(const char* line1, const char* line2) {
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setCursor(0, 20);
-  display.println(line1);
-  display.println(line2);
-  display.display();
-}
+const char* TOKEN = "YOUR_ACCESS_TOKEN";   // Access token của device trên ThingsBoard
+const int LED_PIN = 4;
 
 void setup() {
   Serial.begin(115200);
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    Serial.println("Không tìm thấy OLED SSD1306!");
-    for (;;) delay(1000);
-  }
-  display.setTextColor(SSD1306_WHITE);
-  showMessage("Dang ket noi WiFi", ssid);
+  pinMode(LED_PIN, OUTPUT);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(250);
     Serial.print(".");
   }
-  Serial.println();
-  Serial.print("WiFi OK, IP: ");
+  Serial.print("\\nWiFi OK, IP: ");
   Serial.println(WiFi.localIP());
-  showMessage("WiFi OK, IP:", WiFi.localIP().toString().c_str());
 }
 
 void loop() {
   HTTPClient http;
-  http.begin(url);
+  http.begin(String("https://thingsboard.cloud/api/v1/") + TOKEN + "/attributes?sharedKeys=led-state");
   int code = http.GET();
-  Serial.printf("HTTP code: %d\\n", code);
   if (code == HTTP_CODE_OK) {
-    String payload = http.getString();
+    String payload = http.getString();   // vd: {"shared":{"led-state":true}}
     JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, payload);
-    if (!err) {
-      float temp = doc["current_weather"]["temperature"];
-      float wind = doc["current_weather"]["windspeed"];
-      String time = doc["current_weather"]["time"] | "";
-      Serial.printf("Ha Noi: %.1f C, gio %.1f km/h\\n", temp, wind);
-
-      display.clearDisplay();
-      display.setTextSize(1);
-      display.setCursor(0, 0);
-      display.print("Ha Noi");
-      display.setCursor(128 - 6 * 5, 0);
-      display.print(time.substring(11, 16));           // giờ cập nhật hh:mm (GMT)
-      display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
-      display.setTextSize(3);
-      display.setCursor(0, 18);
-      display.print(temp, 1);
-      int x = display.getCursorX();
-      display.drawCircle(x + 4, 20, 3, SSD1306_WHITE);   // dấu độ
-      display.setCursor(x + 10, 18);
-      display.print("C");
-      display.setTextSize(1);
-      display.setCursor(0, 54);
-      display.printf("Gio: %.1f km/h", wind);
-      display.display();
+    if (deserializeJson(doc, payload) == DeserializationError::Ok) {
+      bool led = doc["shared"]["led-state"];
+      digitalWrite(LED_PIN, led ? HIGH : LOW);
+      Serial.println(led ? "LED: BẬT" : "LED: TẮT");
     } else {
-      Serial.print("JSON error: ");
-      Serial.println(err.c_str());
-      showMessage("Loi JSON:", err.c_str());
+      Serial.println("Lỗi JSON: " + payload);
     }
+  } else if (code > 0) {
+    Serial.printf("HTTP %d — kiểm tra lại TOKEN\\n", code);   // 401: sai Access token
   } else {
-    Serial.println("Lỗi: " + http.errorToString(code));
-    showMessage("Loi HTTP", http.errorToString(code).c_str());
+    Serial.println("Lỗi: " + http.errorToString(code));    // không kết nối được
   }
   http.end();
-  delay(30000);
+  delay(1000);
 }
 `,
-    diagram: diagram(OLED_PARTS, OLED_CONNS),
+    diagram: diagram(LED_D4.parts, LED_D4.conns),
   },
   {
-    id: 'http-post', name: '14. HTTP POST dữ liệu cảm biến (JSON)', category: 'IoT',
-    code: `#include <WiFi.h>
+    id: 'http-post', name: '14. HTTP POST: gửi dữ liệu cảm biến lên ThingsBoard', category: 'IoT',
+    code: `// Mỗi 5 giây đọc DHT22 và gửi nhiệt độ, độ ẩm lên ThingsBoard Cloud bằng HTTP POST (telemetry).
+// Trên thingsboard.cloud: tạo device, copy Access token vào TOKEN; xem dữ liệu ở tab "Latest telemetry".
+#include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <DHT.h>
 
+const char* ssid = "ESP32-IoT-GUEST";
+const char* password = "";
+const char* TOKEN = "YOUR_ACCESS_TOKEN";   // Access token của device trên ThingsBoard
+
 DHT dht(15, DHT22);
-const char* serverUrl = "https://httpbin.org/post";   // server thử nghiệm, trả lại dữ liệu đã gửi
 
 void setup() {
   Serial.begin(115200);
   dht.begin();
-  WiFi.begin("ESP32-IoT-GUEST", "");
-  Serial.print("Connecting");
-  while (WiFi.status() != WL_CONNECTED) { delay(200); Serial.print("."); }
-  Serial.println(" OK");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(250);
+    Serial.print(".");
+  }
+  Serial.print("\\nWiFi OK, IP: ");
+  Serial.println(WiFi.localIP());
 }
 
 void loop() {
   JsonDocument doc;
-  doc["device"] = "esp32-sim";
   doc["temperature"] = dht.readTemperature();
   doc["humidity"] = dht.readHumidity();
-  doc["uptime"] = millis() / 1000;
   String body;
-  serializeJson(doc, body);
+  serializeJson(doc, body);   // vd: {"temperature":24.5,"humidity":40}
 
   HTTPClient http;
-  http.begin(serverUrl);
+  http.begin(String("https://thingsboard.cloud/api/v1/") + TOKEN + "/telemetry");
   http.addHeader("Content-Type", "application/json");
   int code = http.POST(body);
-  Serial.printf("POST %s -> %d\\n", body.c_str(), code);
-  if (code > 0) {
-    JsonDocument resp;
-    deserializeJson(resp, http.getString());
-    Serial.print("Server nhận: ");
-    serializeJson(resp["json"], Serial);
-    Serial.println();
+  if (code == HTTP_CODE_OK) {
+    Serial.println("Đã gửi: " + body);
+  } else if (code > 0) {
+    Serial.printf("HTTP %d — kiểm tra lại TOKEN\\n", code);   // 401: sai Access token
+  } else {
+    Serial.println("Lỗi: " + http.errorToString(code));    // không kết nối được
   }
   http.end();
-  delay(10000);
+  delay(5000);
 }
 `,
     diagram: diagram([DHT_LCD_PARTS[1]], DHT_CONNS),
   },
   {
-    id: 'mqtt', name: '15. MQTT: gửi DHT22, nhận lệnh bật/tắt LED', category: 'IoT',
-    code: `#include <WiFi.h>
+    id: 'mqtt', name: '15. MQTT ThingsBoard: gửi DHT22, điều khiển LED', category: 'IoT',
+    code: `// MQTT với ThingsBoard Cloud: mỗi 5 giây gửi nhiệt độ, độ ẩm (DHT22) làm telemetry,
+// và bật/tắt LED theo shared attribute "led-state" (nhận ngay khi giá trị đổi trên ThingsBoard).
+// Trên thingsboard.cloud: tạo device, copy Access token vào TOKEN, thêm Shared attribute "led-state" kiểu Boolean.
+// Trình duyệt không mở được kết nối TCP: MQTT tới thingsboard.cloud:1883 đi qua server.js (cần chạy "npm start").
+#include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <DHT.h>
 
-// Đổi TOPIC thành tên riêng của bạn để không trùng với người khác!
-#define TOPIC_BASE "esp32sim/demo"
-
-const char* mqttServer = "broker.hivemq.com";
+const char* ssid = "ESP32-IoT-GUEST";
+const char* password = "";
+const char* mqttServer = "thingsboard.cloud";
 const int mqttPort = 1883;
+const char* TOKEN = "YOUR_ACCESS_TOKEN";   // Access token của device = username MQTT
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -782,23 +750,27 @@ void callback(char* topic, byte* payload, unsigned int length) {
   String msg = "";
   for (unsigned int i = 0; i < length; i++) msg += (char)payload[i];
   Serial.printf("Nhận [%s]: %s\\n", topic, msg.c_str());
-  if (String(topic) == TOPIC_BASE "/led") {
-    if (msg == "on" || msg == "1") digitalWrite(LED_PIN, HIGH);
-    if (msg == "off" || msg == "0") digitalWrite(LED_PIN, LOW);
-    client.publish(TOPIC_BASE "/led/state", digitalRead(LED_PIN) ? "on" : "off");
-  }
+  JsonDocument doc;
+  if (deserializeJson(doc, msg)) return;
+  bool led;
+  if (doc.containsKey("shared")) led = doc["shared"]["led-state"];   // trả lời yêu cầu đọc attribute
+  else if (doc.containsKey("led-state")) led = doc["led-state"];     // giá trị mới từ ThingsBoard
+  else return;
+  digitalWrite(LED_PIN, led ? HIGH : LOW);
+  Serial.println(led ? "LED: BẬT" : "LED: TẮT");
 }
 
 void reconnect() {
   while (!client.connected()) {
-    String clientId = "esp32-sim-" + String(random(0xffff), HEX);
-    Serial.print("Kết nối MQTT... ");
-    if (client.connect(clientId.c_str())) {
+    Serial.print("Kết nối ThingsBoard MQTT... ");
+    if (client.connect("esp32-sim", TOKEN, NULL)) {
       Serial.println("OK");
-      client.subscribe(TOPIC_BASE "/led");
+      client.subscribe("v1/devices/me/attributes");               // nhận cập nhật shared attribute
+      client.subscribe("v1/devices/me/attributes/response/+");
+      client.publish("v1/devices/me/attributes/request/1", "{\\"sharedKeys\\":\\"led-state\\"}");   // đọc giá trị hiện tại
     } else {
-      Serial.printf("lỗi rc=%d, thử lại sau 3s\\n", client.state());
-      delay(3000);
+      Serial.printf("lỗi rc=%d (5 = sai TOKEN), thử lại sau 5s\\n", client.state());
+      delay(5000);
     }
   }
 }
@@ -807,9 +779,12 @@ void setup() {
   Serial.begin(115200);
   pinMode(LED_PIN, OUTPUT);
   dht.begin();
-  WiFi.begin("ESP32-IoT-GUEST", "");
-  while (WiFi.status() != WL_CONNECTED) { delay(250); Serial.print("."); }
-  Serial.println("\\nWiFi connected");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(250);
+    Serial.print(".");
+  }
+  Serial.println("\\nWiFi OK");
   client.setServer(mqttServer, mqttPort);
   client.setCallback(callback);
 }
@@ -820,11 +795,11 @@ void loop() {
   if (millis() - lastSend > 5000) {
     lastSend = millis();
     JsonDocument doc;
-    doc["temp"] = dht.readTemperature();
-    doc["hum"] = dht.readHumidity();
+    doc["temperature"] = dht.readTemperature();
+    doc["humidity"] = dht.readHumidity();
     char buf[128];
     serializeJson(doc, buf);
-    client.publish(TOPIC_BASE "/sensor", buf);
+    client.publish("v1/devices/me/telemetry", buf);
     Serial.printf("Gửi: %s\\n", buf);
   }
   delay(10);
@@ -921,12 +896,12 @@ void loop() {
     diagram: diagram(OLED_PARTS, OLED_CONNS),
   },
   {
-    id: 'supermini-boot', name: '18. Nút BOOT & LED trên board', category: 'Cơ bản',
+    id: 'xiao-c6-boot', name: '18. Nút BOOT & LED trên board', category: 'Cơ bản',
     code: `// Nút BOOT trên board nối xuống GND — khi đang chạy, nhấn giữ chuột lên board để nhấn BOOT.
-// LED trên board (LED_BUILTIN) nháy 1 Hz; trên ESP32-C3 SuperMini / XIAO ESP32-S3 nó sáng khi xuất LOW.
+// LED trên board (LED_BUILTIN) nháy 1 Hz; trên XIAO ESP32-C6 nó sáng khi xuất LOW.
 // Board không có nút BOOT / LED trên board thì được thay bằng nút nhấn / LED ngoài khi mở ví dụ.
 #define BOOT_PIN 9
-#define LED_PIN 3   // LED ngoài: LED_PIN -> điện trở -> LED -> GND
+#define LED_PIN D2  // LED ngoài: LED_PIN -> điện trở -> LED -> GND
 
 bool last = false;
 
@@ -949,13 +924,13 @@ void loop() {
   delay(20);
 }
 `,
-    diagram: boardDiagram('board-esp32-c3-supermini', [
-      { type: 'esp32-iot-resistor', id: 'r1', top: 68, left: -90, attrs: { value: '220' } },
-      { type: 'esp32-iot-led', id: 'led1', top: 0, left: -150, attrs: { color: 'green' } },
+    diagram: boardDiagram('board-xiao-esp32-c6', [
+      { type: 'esp32-iot-resistor', id: 'r1', top: 44, left: -90, attrs: { value: '220' } },
+      { type: 'esp32-iot-led', id: 'led1', top: -24, left: -150, attrs: { color: 'green' } },
     ], [
-      C('esp:3', 'r1:2', 'green', []),
-      C('r1:1', 'led1:A', 'green', [[-140, 74]]),
-      C('led1:C', 'esp:GND', 'black', [[-130, 44], [-10, 44], [-10, 38]]),
+      C('esp:D2', 'r1:2', 'green', []),
+      C('r1:1', 'led1:A', 'green', [[-140, 50]]),
+      C('led1:C', 'esp:GND', 'black', [[-130, 125], [100, 125], [100, 38]]),
     ]),
   },
   {
@@ -991,7 +966,7 @@ void loop() {
     ]),
   },
   {
-    id: 'xiao-s3-oled', name: '20. OLED: thông tin chip & LED trên board', category: 'Hiển thị',
+    id: 'xiao-c6-oled', name: '20. OLED: thông tin chip & LED trên board', category: 'Hiển thị',
     code: `// OLED I2C trên chân SDA/SCL mặc định của board; hiển thị tên chip và số giây đã chạy.
 // LED trên board (LED_BUILTIN) nháy 1 Hz.
 #include <Wire.h>
@@ -1027,7 +1002,7 @@ void loop() {
   delay(200);
 }
 `,
-    diagram: boardDiagram('board-xiao-esp32-s3', [{ type: 'esp32-iot-ssd1306', id: 'oled1', top: -70, left: 150, attrs: { address: '0x3C' } }], [
+    diagram: boardDiagram('board-xiao-esp32-c6', [{ type: 'esp32-iot-ssd1306', id: 'oled1', top: -70, left: 150, attrs: { address: '0x3C' } }], [
       C('esp:D4', 'oled1:SDA', 'blue', [[-20, 74], [-20, -85], [241, -85]]),
       C('esp:D5', 'oled1:SCL', 'yellow', [[-30, 86], [-30, -90], [227, -90]]),
       C('esp:3V3', 'oled1:VCC', 'red', [[120, 50], [120, -80], [213, -80]]),
@@ -1151,7 +1126,7 @@ void loop() {
 // Khi chạy: chọn cảm biến, kéo "Cường độ lửa (%)" lên trên ngưỡng.
 const int FLAME_DO = 35;
 const int LED_PIN = 5;
-const int BUZZER_PIN = 4;    // buzzer nối sẵn trên kit: GPIO4 (DevKit), D3 (board mở rộng XIAO), A3 (C3 SuperMini)
+const int BUZZER_PIN = 4;    // buzzer nối sẵn trên kit: GPIO4 (DevKit), D3 (board mở rộng XIAO)
 
 bool lastFire = false;
 unsigned long fireCount = 0;
@@ -1198,7 +1173,7 @@ void loop() {
 // Khi chạy: chọn cảm biến, kéo "Nồng độ khí (ppm)" vượt "Ngưỡng DO".
 const int GAS_DO = 34;
 const int LED_PIN = 5;
-const int BUZZER_PIN = 4;    // buzzer nối sẵn trên kit: GPIO4 (DevKit), D3 (board mở rộng XIAO), A3 (C3 SuperMini)
+const int BUZZER_PIN = 4;    // buzzer nối sẵn trên kit: GPIO4 (DevKit), D3 (board mở rộng XIAO)
 
 volatile bool changed = false;
 
@@ -1763,7 +1738,7 @@ void loop() {
     id: 'lora-sender', name: '31. LoRa: node gửi nhiệt độ/độ ẩm', category: 'Truyền thông',
     code: `// LoRa SX1278 (Ra-02, 433 MHz) qua SPI: gửi nhiệt độ/độ ẩm DHT22 mỗi 5 giây.
 // Thư viện: LoRa by Sandeep Mistry (#include <LoRa.h>).
-// Thử nghiệm: mở trình giả lập ở MỘT TAB KHÁC với ví dụ "30. LoRa: node nhận" rồi chạy cả hai —
+// Thử nghiệm: mở trình giả lập ở MỘT TAB KHÁC với ví dụ "LoRa: node nhận" rồi chạy cả hai —
 // các tab chung một "không gian sóng" ảo. Tần số, spreading factor và sync word hai bên phải giống nhau.
 #include <SPI.h>
 #include <LoRa.h>
@@ -1810,7 +1785,7 @@ void loop() {
   {
     id: 'lora-receiver', name: '32. LoRa: node nhận + OLED (RSSI/SNR)', category: 'Truyền thông',
     code: `// LoRa SX1278: nhận gói tin, in nội dung + RSSI/SNR và hiển thị lên OLED SSD1306 kèm vạch sóng.
-// Chạy cùng ví dụ "29. LoRa: node gửi" ở một tab khác, hoặc chọn module LoRa
+// Chạy cùng ví dụ "LoRa: node gửi" ở một tab khác, hoặc chọn module LoRa
 // và bấm "Nhận gói tin thử" để giả lập một gói từ node khác (sửa nội dung/RSSI trong thuộc tính).
 #include <SPI.h>
 #include <LoRa.h>
@@ -1895,7 +1870,7 @@ void loop() {
     id: 'espnow-sender', name: '33. ESP-NOW: gửi struct (broadcast)', category: 'Truyền thông',
     code: `// ESP-NOW: gửi dữ liệu trực tiếp giữa các ESP32, không cần router WiFi (tối đa 250 byte/gói).
 // Gửi một struct (biến trở + nút nhấn) tới địa chỉ broadcast FF:FF:FF:FF:FF:FF mỗi giây và ngay khi nhấn nút.
-// Thử nghiệm: mở ví dụ "28. ESP-NOW: nhận struct" ở một tab khác rồi chạy cả hai.
+// Thử nghiệm: mở ví dụ "ESP-NOW: nhận struct" ở một tab khác rồi chạy cả hai.
 // Muốn gửi riêng (unicast) cho một board: thay broadcastAddress bằng MAC board nhận (in ở Serial của nó).
 #include <WiFi.h>
 #include <esp_now.h>
@@ -1971,7 +1946,7 @@ void loop() {
   },
   {
     id: 'espnow-receiver', name: '34. ESP-NOW: nhận struct → LED', category: 'Truyền thông',
-    code: `// ESP-NOW: nhận struct từ ví dụ "27. ESP-NOW: gửi struct" (chạy ở tab khác).
+    code: `// ESP-NOW: nhận struct từ ví dụ "ESP-NOW: gửi struct" (chạy ở tab khác).
 // Biến trở bên gửi điều khiển độ sáng LED (PWM), nút nhấn bên gửi bật LED trên board.
 #include <WiFi.h>
 #include <esp_now.h>
@@ -2034,7 +2009,7 @@ void loop() {
 //   coap://10.13.37.50/led   GET -> "0"/"1"; PUT "1" | "0" | "toggle" để điều khiển LED
 //   coap://10.13.37.50/temp  GET -> JSON nhiệt độ/độ ẩm DHT22
 //   coap://10.13.37.50/.well-known/core -> danh sách tài nguyên (thư viện tự trả lời)
-// Thử nghiệm: chạy ví dụ "23. CoAP client" ở một tab khác (cùng mạng WiFi ảo 10.13.37.x).
+// Thử nghiệm: chạy một board CoAP client ở tab khác (cùng mạng WiFi ảo 10.13.37.x), gửi tới coap://10.13.37.50/…
 // Thư viện: CoAP simple library (#include <coap-simple.h>).
 #include <WiFi.h>
 #include <WiFiUdp.h>
@@ -2099,71 +2074,93 @@ void loop() {
     diagram: compose(LED_D4, dhtAt(300, 120)),
   },
   {
-    id: 'coap-client', name: '36. CoAP client: GET/PUT tới server', category: 'Giao thức',
-    code: `// CoAP client: nhấn nút -> PUT "toggle" tới coap://10.13.37.50/led (ví dụ "22. CoAP server" ở tab khác),
-// mỗi 5 giây GET /temp. Khi khởi động còn thử GET coap://coap.me/test — server CoAP công cộng trên Internet
-// (cần chạy bằng "node server.js": trình duyệt không gửi được UDP, server sẽ chuyển tiếp gói tin).
-// Phản hồi đến hàm callback_response(): mã 2.05 = Content, 2.04 = Changed, 4.04 = Not Found...
+    id: 'coap-client', name: '22. CoAP ThingsBoard: gửi DHT22, điều khiển LED', category: 'Giao thức',
+    code: `// CoAP với ThingsBoard Cloud (coap.thingsboard.cloud:5683): mỗi 5 giây
+//  - POST nhiệt độ, độ ẩm (DHT22) lên /api/v1/TOKEN/telemetry
+//  - GET shared attribute "led-state" (/api/v1/TOKEN/attributes?sharedKeys=led-state) rồi bật/tắt LED.
+// Trên thingsboard.cloud: tạo device, copy Access token vào TOKEN, thêm Shared attribute "led-state" kiểu Boolean.
+// Trình duyệt không gửi được UDP: cần chạy "npm start", server sẽ chuyển tiếp gói CoAP.
+// Phản hồi đến hàm callback_response(): 2.01 = Created, 2.05 = Content, 4.01 = sai TOKEN.
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <coap-simple.h>
+#include <ArduinoJson.h>
+#include <DHT.h>
 
-const int BUTTON_PIN = 15;
-IPAddress serverIP(10, 13, 37, 50);
+const char* ssid = "ESP32-IoT-GUEST";
+const char* password = "";
+const char* TOKEN = "YOUR_ACCESS_TOKEN";   // Access token của device trên ThingsBoard
+const int LED_PIN = 4;
 
 WiFiUDP udp;
 Coap coap(udp);
-int lastButton = HIGH;
-unsigned long lastGet = 0;
+DHT dht(15, DHT22);
+IPAddress tbIP;
+String telemetryUrl, attributesUrl;
+unsigned long lastSend = 0;
 
 void callback_response(CoapPacket &packet, IPAddress ip, int port) {
   char p[packet.payloadlen + 1];
   memcpy(p, packet.payload, packet.payloadlen);
   p[packet.payloadlen] = NULL;
-  Serial.printf("[CoAP] Phản hồi %d.%02d từ %s (mid %d): %s\\n", packet.code >> 5, packet.code & 0x1F,
-                ip.toString().c_str(), packet.messageid, p);
-  if (ip == serverIP && packet.payloadlen == 1) digitalWrite(LED_BUILTIN, p[0] == '1');   // trạng thái LED bên server
+  Serial.printf("[CoAP] Phản hồi %d.%02d (mid %d): %s\\n", packet.code >> 5, packet.code & 0x1F, packet.messageid, p);
+  // Không so message id: server có thể trả ACK rỗng trước, rồi gửi kết quả trong gói CON mới (mid khác).
+  // Nhận diện phản hồi của GET attribute bằng nội dung: {"shared":{"led-state":true}}
+  if (packet.code != COAP_CONTENT) return;
+  JsonDocument doc;
+  if (deserializeJson(doc, p) || !doc.containsKey("shared")) return;
+  bool led = doc["shared"]["led-state"];
+  digitalWrite(LED_PIN, led ? HIGH : LOW);
+  Serial.println(led ? "LED: BẬT" : "LED: TẮT");
 }
 
 void setup() {
   Serial.begin(115200);
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
-  pinMode(LED_BUILTIN, OUTPUT);
-  WiFi.begin("ESP32-IoT-GUEST", "");
-  while (WiFi.status() != WL_CONNECTED) { delay(250); Serial.print("."); }
+  pinMode(LED_PIN, OUTPUT);
+  dht.begin();
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(250);
+    Serial.print(".");
+  }
   Serial.print("\\nWiFi OK, IP: ");
   Serial.println(WiFi.localIP());
 
+  while (!WiFi.hostByName("coap.thingsboard.cloud", tbIP)) {
+    Serial.println("Không phân giải được coap.thingsboard.cloud, thử lại...");
+    delay(2000);
+  }
+  Serial.print("coap.thingsboard.cloud = ");
+  Serial.println(tbIP);
+  telemetryUrl = String("api/v1/") + TOKEN + "/telemetry";
+  attributesUrl = String("api/v1/") + TOKEN + "/attributes";
+
   coap.response(callback_response);
   coap.start();
-
-  IPAddress coapMe;
-  if (WiFi.hostByName("coap.me", coapMe)) {
-    Serial.print("coap.me = ");
-    Serial.println(coapMe);
-    coap.get(coapMe, 5683, "test");
-  }
 }
 
 void loop() {
-  int b = digitalRead(BUTTON_PIN);
-  if (b != lastButton) {
-    lastButton = b;
-    if (b == LOW) {
-      int id = coap.put(serverIP, 5683, "led", "toggle");
-      Serial.printf("PUT /led toggle (mid %d)\\n", id);
-    }
-    delay(30);
+  if (millis() - lastSend > 5000) {
+    lastSend = millis();
+    JsonDocument doc;
+    doc["temperature"] = dht.readTemperature();
+    doc["humidity"] = dht.readHumidity();
+    char buf[128];
+    serializeJson(doc, buf);
+    coap.send(tbIP, 5683, telemetryUrl.c_str(), COAP_CON, COAP_POST, NULL, 0,
+              (uint8_t*)buf, strlen(buf), COAP_APPLICATION_JSON, NULL);
+    Serial.printf("POST telemetry: %s\\n", buf);
+    coap.send(tbIP, 5683, attributesUrl.c_str(), COAP_CON, COAP_GET, NULL, 0,
+              NULL, 0, COAP_NONE, "sharedKeys=led-state");
   }
-  if (millis() - lastGet > 5000) {
-    lastGet = millis();
-    coap.get(serverIP, 5683, "temp");
-  }
-  coap.loop();                // nhận phản hồi
+  coap.loop();                     // nhận phản hồi
   delay(10);
 }
 `,
-    diagram: diagram(BUTTON_D15.parts, BUTTON_D15.conns),
+    diagram: diagram([...LED_D4.parts, Object.assign({}, DHT_LCD_PARTS[1], { left: 310 })], [...LED_D4.conns,
+      C('esp:D15', 'dht1:SDA', 'green', [[326, 204]]),
+      C('esp:3V3', 'dht1:VCC', 'red', [[318, 228]]),
+      C('esp:GND.2', 'dht1:GND', 'black', [[342, 216]])]),
   },
   // ---------------------------------------------------------------- catalog additions
   {
@@ -2174,7 +2171,7 @@ void loop() {
 // Khi chạy: chọn cảm biến, kéo "Mức mưa (%)" lên trên "Ngưỡng DO".
 const int RAIN_DO = 35;
 const int LED_PIN = 5;
-const int BUZZER_PIN = 4;    // buzzer nối sẵn trên kit: GPIO4 (DevKit), D3 (board mở rộng XIAO), A3 (C3 SuperMini)
+const int BUZZER_PIN = 4;    // buzzer nối sẵn trên kit: GPIO4 (DevKit), D3 (board mở rộng XIAO)
 
 bool raining = false;
 unsigned long rainStart = 0;
@@ -3112,6 +3109,7 @@ const CATALOG = [
     ['pir-interrupt', 'Cảm biến chuyển động PIR (ngắt ngoài)'],
     ['ldr-digital', 'Quang trở (DO): đèn ngủ tự động'],
     ['photodiode-digital', 'Photodiode (DO): đếm số lần chắn tia sáng'],
+    ['ultrasonic', 'Cảm biến siêu âm HC-SR04: đo khoảng cách + còi'],
   ]],
   ['Cảm biến tương tự (analog)', [
     ['ldr-analog', 'Quang trở (AO): đèn tự điều chỉnh độ sáng'],
@@ -3120,7 +3118,6 @@ const CATALOG = [
     ['soil-irrigation', 'Độ ẩm đất (AO): tưới cây tự động'],
     ['water-level', 'Cảm biến mực nước (AO): báo mức bồn'],
     ['grove-temperature', 'Grove Temperature Sensor V1.2 (NTC): nhiệt độ → OLED'],
-    ['ultrasonic', 'Cảm biến siêu âm HC-SR04: đo khoảng cách + còi'],
   ]],
   ['Cảm biến 1 dây (OneWire)', [
     ['ds18b20', 'DS18B20: 2 cảm biến nhiệt độ trên một bus 1-Wire'],
@@ -3135,11 +3132,10 @@ const CATALOG = [
     ['mlx90614', 'MLX90614: nhiệt độ vật thể (hồng ngoại) → OLED'],
   ]],
   ['Kết nối', [
-    ['http-get', 'HTTP GET: nhận dữ liệu thời tiết (JSON) → OLED'],
-    ['http-post', 'HTTP POST: gửi dữ liệu cảm biến (JSON)'],
-    ['mqtt', 'MQTT: gửi DHT22, nhận lệnh bật/tắt LED'],
-    ['coap-server', 'CoAP server: LED & nhiệt độ'],
-    ['coap-client', 'CoAP client: GET/PUT tới server'],
+    ['http-get', 'HTTP GET: điều khiển LED từ ThingsBoard'],
+    ['http-post', 'HTTP POST: gửi dữ liệu cảm biến lên ThingsBoard'],
+    ['mqtt', 'MQTT ThingsBoard: gửi DHT22, điều khiển LED'],
+    ['coap-client', 'CoAP ThingsBoard: gửi DHT22, điều khiển LED'],
     ['webserver-config', 'HTTP server: trang web cấu hình thiết bị'],
   ]],
   ['FreeRTOS', [

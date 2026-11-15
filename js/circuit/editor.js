@@ -1,6 +1,7 @@
 // Diagram editor: parts placement, wiring, pan/zoom, selection, property inspector.
 import { PARTS, partSize, partPins, defaultAttrs } from './parts.js';
 import { routeWires } from './route.js';
+import { LEGACY_BOARDS } from '../boards.js';
 
 const ID_PREFIX = {
   'esp32-iot-esp32-devkit-v1': 'esp', 'esp32-iot-led': 'led', 'esp32-iot-resistor': 'r', 'esp32-iot-pushbutton': 'btn',
@@ -61,7 +62,8 @@ export class DiagramEditor {
     this.wires = [];
     this.sel = null;
     for (const p of diagram.parts || []) {
-      const type = String(p.type).replace(/^wokwi-/, 'esp32-iot-');   // part ids of projects saved before the rename
+      let type = String(p.type).replace(/^wokwi-/, 'esp32-iot-');   // part ids of projects saved before the rename
+      type = LEGACY_BOARDS[type] || type;                             // removed boards → their replacement
       if (!PARTS[type]) continue;
       this.addPart(type, p.left || 0, p.top || 0, { id: p.id, rotate: p.rotate || 0, attrs: Object.assign(defaultAttrs(type), p.attrs || {}) }, true);
     }

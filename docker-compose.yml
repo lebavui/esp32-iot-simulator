@@ -4,14 +4,26 @@ services:
     image: ${DOCKERHUB_USER:?Cần đặt DOCKERHUB_USER trong .env}/esp32-iot-simulator:${TAG:-latest}
     container_name: esp32sim
     restart: unless-stopped
-    # Chỉ mở cổng cho nginx trên chính VPS; bên ngoài truy cập qua https://iot.lebavui.io.vn
+    # Chỉ mở cổng cho nginx trên chính VPS; bên ngoài truy cập qua https://iot.dcelab.io.vn
     # Cổng 8020 trên VPS (8080 đã có dịch vụ khác) → cổng 8080 trong container
     ports:
       - "127.0.0.1:8020:8080"
     environment:
       - PROXY_BLOCK_PRIVATE=1
+      # Giới hạn link chia sẻ (đổi trong .env nếu cần, xem DEPLOY.md)
+      - SHARE_MAX_KB=${SHARE_MAX_KB:-64}
+      - SHARE_RATE=${SHARE_RATE:-30}
+      - SHARE_QUOTA_MB=${SHARE_QUOTA_MB:-1024}
+      - SHARE_EVICT=${SHARE_EVICT:-1}
+      - SHARE_TTL_DAYS=${SHARE_TTL_DAYS:-365}
+    # Dự án được chia sẻ (link #s=…) lưu trong volume, giữ nguyên khi kéo image mới
+    volumes:
+      - esp32sim-data:/app/data
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  esp32sim-data:

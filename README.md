@@ -27,10 +27,10 @@ và chỉ hoạt động với API cho phép CORS.
 lambda, range-for, `switch`, biến `static`. Lỗi biên dịch được báo theo dòng/cột kiểu GCC
 (`'x' was not declared in this scope`, `expected ';' …`).
 
-**Board**: ESP32 DevKit V1 (30 chân, LED onboard GPIO2), Seeed XIAO ESP32-C3, Seeed XIAO ESP32-S3 (LED onboard GPIO21),
-ESP32-C3 SuperMini (LED onboard GPIO8, nút BOOT GPIO9). Mỗi board có hằng số chân (`A0`, `D0`…, `SDA`/`SCL`, `LED_BUILTIN`)
-theo `pins_arduino.h` của arduino-esp32 3.3, macro `CONFIG_IDF_TARGET_ESP32C3`/`…S3`, và kiểm tra theo chip (chân flash,
-ADC1/ADC2, chân chỉ-vào của ESP32, ADC2 của ESP32-C3 không dùng được). Board chọn ở ô riêng trên thanh công cụ; đổi board
+**Board**: ESP32 DevKit V1 (30 chân, LED onboard GPIO2), Seeed XIAO ESP32-C3 (nút BOOT D9/GPIO9), Seeed XIAO ESP32-C6
+(LED onboard GPIO15, nút BOOT GPIO9). Mỗi board có hằng số chân (`A0`, `D0`…, `SDA`/`SCL`, `LED_BUILTIN`)
+theo `pins_arduino.h` của arduino-esp32 3.3, macro `CONFIG_IDF_TARGET_ESP32C3`/`…C6`, và kiểm tra theo chip (chân flash,
+ADC1/ADC2, chân chỉ-vào của ESP32, ADC2 của ESP32-C3 không dùng được, ESP32-C6 chỉ có ADC1 GPIO0–6). Board chọn ở ô riêng trên thanh công cụ; đổi board
 (hoặc mở ví dụ khi đang chọn board khác) sẽ tự chuyển dây nối và số chân trong code sang board đó.
 
 **Linh kiện**: LED, LED RGB, điện trở, nút nhấn, công tắc gạt,
@@ -68,7 +68,7 @@ FreeRTOS (`xTaskCreate`, `vTaskDelay`, hàng đợi `xQueue…`, semaphore/mutex
 
 **Giao diện**: trình soạn thảo code (CodeMirror) + tab `diagram.json` sửa trực tiếp, canvas kéo-thả có zoom/pan,
 nối dây có điểm gấp và đổi màu (dây tự đi vuông góc vòng qua linh kiện, đi lại khi di chuyển linh kiện), bảng thuộc tính (thanh trượt nhiệt độ, khoảng cách, độ sáng… thay đổi khi đang chạy),
-Serial Monitor hai chiều, giao diện tối/sáng (nút ☀/🌙 hoặc theo hệ điều hành), ẩn/hiện khung code (Ctrl+B) và panel dưới (Ctrl+J), 30 ví dụ mẫu theo chủ đề (vào ra cơ bản, cảm biến số/tương tự/1-Wire/I2C, kết nối, FreeRTOS, ESP-NOW/LoRa), tự lưu vào trình duyệt, lưu/mở file `.json`/`.ino`, chia sẻ dự án qua link.
+Serial Monitor hai chiều, giao diện tối/sáng (nút ☀/🌙 hoặc theo hệ điều hành), ẩn/hiện khung code (Ctrl+B) và panel dưới (Ctrl+J), 30 ví dụ mẫu theo chủ đề (vào ra cơ bản, cảm biến số/tương tự/1-Wire/I2C, kết nối, FreeRTOS, ESP-NOW/LoRa), tự lưu vào trình duyệt, lưu/mở file `.json`/`.ino`, chia sẻ dự án qua link ngắn (lưu trên server, xem DEPLOY.md).
 
 ## Cấu trúc mã nguồn
 
@@ -99,6 +99,7 @@ và khai báo kiểu trả về trong `meta.ret` để trình biên dịch đị
 npm test                               # biên dịch + chạy toàn bộ ví dụ với bộ giải mạch
 node tests/harness.mjs tests/t_basic.ino   # chạy một sketch, in Serial
 node tests/t_radio.mjs                 # cảm biến/relay mới, LoRa/ESP-NOW/CoAP/WebServer giữa hai runtime
+node tests/t_share.mjs                 # link chia sẻ ngắn: giới hạn lưu trữ + endpoint /__share của server.js
 ```
 
 ## Giới hạn

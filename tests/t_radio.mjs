@@ -344,6 +344,75 @@ void loop() { delay(100); }` });
   await t.stop();
 }
 
+// CoAP client board for the coap-server example (the menu's CoAP example talks to ThingsBoard instead):
+// button on GPIO15 → PUT /led toggle, GET /temp every 5 s, mirrors the server LED on LED_BUILTIN
+const COAP_CLIENT = {
+  diagram: { parts: [{ type: 'esp32-iot-esp32-devkit-v1', id: 'esp', top: 0, left: 0, attrs: {} }, { type: 'esp32-iot-pushbutton', id: 'btn1', top: 220, left: 160, attrs: { color: 'green' } }],
+    connections: [['esp:D15', 'btn1:1', 'blue'], ['btn1:2', 'esp:GND.2', 'black']] },
+  code: `// CoAP client: nhấn nút -> PUT "toggle" tới coap://10.13.37.50/led (ví dụ coap-server ở tab khác),
+// mỗi 5 giây GET /temp. Khi khởi động còn thử GET coap://coap.me/test — server CoAP công cộng trên Internet
+// (cần chạy bằng "node server.js": trình duyệt không gửi được UDP, server sẽ chuyển tiếp gói tin).
+// Phản hồi đến hàm callback_response(): mã 2.05 = Content, 2.04 = Changed, 4.04 = Not Found...
+#include <WiFi.h>
+#include <WiFiUdp.h>
+#include <coap-simple.h>
+
+const int BUTTON_PIN = 15;
+IPAddress serverIP(10, 13, 37, 50);
+
+WiFiUDP udp;
+Coap coap(udp);
+int lastButton = HIGH;
+unsigned long lastGet = 0;
+
+void callback_response(CoapPacket &packet, IPAddress ip, int port) {
+  char p[packet.payloadlen + 1];
+  memcpy(p, packet.payload, packet.payloadlen);
+  p[packet.payloadlen] = NULL;
+  Serial.printf("[CoAP] Phản hồi %d.%02d từ %s (mid %d): %s\\n", packet.code >> 5, packet.code & 0x1F,
+                ip.toString().c_str(), packet.messageid, p);
+  if (ip == serverIP && packet.payloadlen == 1) digitalWrite(LED_BUILTIN, p[0] == '1');   // trạng thái LED bên server
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(LED_BUILTIN, OUTPUT);
+  WiFi.begin("ESP32-IoT-GUEST", "");
+  while (WiFi.status() != WL_CONNECTED) { delay(250); Serial.print("."); }
+  Serial.print("\\nWiFi OK, IP: ");
+  Serial.println(WiFi.localIP());
+
+  coap.response(callback_response);
+  coap.start();
+
+  IPAddress coapMe;
+  if (WiFi.hostByName("coap.me", coapMe)) {
+    Serial.print("coap.me = ");
+    Serial.println(coapMe);
+    coap.get(coapMe, 5683, "test");
+  }
+}
+
+void loop() {
+  int b = digitalRead(BUTTON_PIN);
+  if (b != lastButton) {
+    lastButton = b;
+    if (b == LOW) {
+      int id = coap.put(serverIP, 5683, "led", "toggle");
+      Serial.printf("PUT /led toggle (mid %d)\\n", id);
+    }
+    delay(30);
+  }
+  if (millis() - lastGet > 5000) {
+    lastGet = millis();
+    coap.get(serverIP, 5683, "temp");
+  }
+  coap.loop();                // nhận phản hồi
+  delay(10);
+}
+`,
+};
 // ---------------------------------------------------------------- CoAP
 {
   const enc = coapEncode({ type: 0, code: 1, messageid: 0x1234, token: Uint8Array.of(9), options: [{ number: 11, buffer: Uint8Array.from(Buffer.from('a-rather-long-path-segment')) }, { number: 3, buffer: Uint8Array.from(Buffer.from('h')) }], payload: Uint8Array.of(1, 2) });
@@ -353,7 +422,7 @@ void loop() { delay(100); }` });
   const srv = boot('coap-server');
   await until(() => srv.out.includes('CoAP server đang chạy'));
   check('CoAP: static IP 10.13.37.50', srv.out.includes('IP: 10.13.37.50'));
-  const cli = boot('coap-client');
+  const cli = boot(COAP_CLIENT);
   check('CoAP: GET /temp → JSON', await until(() => cli.out.includes('Phản hồi 2.05 từ 10.13.37.50') && cli.out.includes('{"t":28.5,"h":65}'), 8000), cli.out.slice(-300));
   cli.part('btn1').pressed = true;
   cli.sim.invalidate();
@@ -362,7 +431,7 @@ void loop() { delay(100); }` });
   check('CoAP: hostByName offline → 0 (no crash)', !cli.out.includes('coap.me ='));
   await cli.stop();
   // raw UDP client asking for an unknown resource and the discovery list
-  const raw = boot('coap-client', { code: `#include <WiFi.h>
+  const raw = boot(COAP_CLIENT, { code: `#include <WiFi.h>
 #include <WiFiUdp.h>
 #include <coap-simple.h>
 WiFiUDP udp;

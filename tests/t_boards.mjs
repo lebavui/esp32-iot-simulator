@@ -23,7 +23,7 @@ async function start(type, code, extraParts = [], wires = []) {
 
 // pin constants per board (pins_arduino.h of arduino-esp32 3.3.x)
 const PRINT = 'void setup(){ Serial.begin(115200); Serial.print(SDA); Serial.print(","); Serial.print(SCL); Serial.print(","); Serial.println(A0); } void loop(){ delay(1000); }';
-for (const [type, want] of [['esp32-iot-esp32-devkit-v1', '21,22,36'], ['board-xiao-esp32-c3', '6,7,2'], ['board-xiao-esp32-s3', '5,6,1'], ['board-esp32-c3-supermini', '8,9,0']]) {
+for (const [type, want] of [['esp32-iot-esp32-devkit-v1', '21,22,36'], ['board-xiao-esp32-c3', '6,7,2'], ['board-xiao-esp32-c6', '22,23,0']]) {
   const t = await start(type, PRINT);
   await wait(80);
   check(`${type}: SDA,SCL,A0`, t.out().trim() === want, t.out().trim());
@@ -32,20 +32,20 @@ for (const [type, want] of [['esp32-iot-esp32-devkit-v1', '21,22,36'], ['board-x
 try { compile('void setup(){ pinMode(LED_BUILTIN, OUTPUT); } void loop(){}', { board: 'board-xiao-esp32-c3' }); check('XIAO C3 has no LED_BUILTIN', false); }
 catch (e) { check('XIAO C3 has no LED_BUILTIN', /LED_BUILTIN/.test(e.message), e.message); }
 
-// SuperMini: BOOT button (GPIO9) pulls the pin low while pressed
+// XIAO C6: BOOT button (GPIO9, not on the header) pulls the pin low while pressed
 {
-  const ex = EXAMPLES.find((e) => e.id === 'supermini-boot');
+  const ex = EXAMPLES.find((e) => e.id === 'xiao-c6-boot');
   const parts = ex.diagram.parts.map((p) => ({ type: p.type, id: p.id, x: p.left, y: p.top, rotate: 0, attrs: Object.assign(defaultAttrs(p.type), p.attrs) }));
   const t = await start(parts[0].type, ex.code, parts.slice(1), ex.diagram.connections.map(([from, to]) => ({ from, to })));
   await wait(100);
   const led = t.parts.find((p) => p.id === 'led1');
-  check('SuperMini: external LED off before BOOT', t.sim.V(led, 'A') === 0);
+  check('XIAO C6: external LED off before BOOT', t.sim.V(led, 'A') === 0);
   t.parts[0].pressed = true; t.sim.invalidate();
   await wait(100);
-  check('SuperMini: BOOT pressed -> LED on', t.sim.V(led, 'A') === 3.3, String(t.sim.V(led, 'A')));
-  check('SuperMini: serial reports the press', /BOOT: nhấn/.test(t.out()));
-  const g8 = t.sim.gpios.get(8);
-  check('SuperMini: LED_BUILTIN is GPIO8 output', !!(g8 && g8.mode & 2));
+  check('XIAO C6: BOOT pressed -> LED on', t.sim.V(led, 'A') === 3.3, String(t.sim.V(led, 'A')));
+  check('XIAO C6: serial reports the press', /BOOT: nhấn/.test(t.out()));
+  const g15 = t.sim.gpios.get(15);
+  check('XIAO C6: LED_BUILTIN is GPIO15 output', !!(g15 && g15.mode & 2));
   await t.stop();
 }
 
@@ -59,10 +59,29 @@ catch (e) { check('XIAO C3 has no LED_BUILTIN', /LED_BUILTIN/.test(e.message), e
   await t.stop();
 }
 {
-  const t = await start('board-xiao-esp32-s3', 'void setup(){ Serial.println(ESP.getChipModel()); Serial.println(xPortGetCoreID()); pinMode(43, OUTPUT); pinMode(26, OUTPUT); } void loop(){ delay(1000); }');
+  const t = await start('board-xiao-esp32-c6', 'void setup(){ Serial.println(ESP.getChipModel()); Serial.println(xPortGetCoreID()); pinMode(23, OUTPUT); pinMode(26, OUTPUT); Serial.println(analogRead(7)); } void loop(){ delay(1000); }');
   await wait(80);
-  check('S3: chip model', t.out().startsWith('ESP32-S3'), t.out().trim());
-  check('S3: GPIO43 valid, GPIO26 flash', !t.logs.some((m) => /GPIO43/.test(m)) && t.logs.some((m) => /GPIO26 .*flash/.test(m)), t.logs.join(' | '));
+  check('C6: chip model, one core', /^ESP32-C6\s+0\b/.test(t.out()), t.out().trim());
+  check('C6: GPIO23 valid, GPIO26 flash', !t.logs.some((m) => /GPIO23/.test(m)) && t.logs.some((m) => /GPIO26 .*flash/.test(m)), t.logs.join(' | '));
+  check('C6: GPIO7 is not an ADC pin', t.logs.some((m) => /GPIO7 không phải chân ADC/.test(m)), t.logs.join(' | '));
+  await t.stop();
+}
+// runtime (not board-specific): deserializeJson() of a char buffer reads a C string, up to the first NUL
+{
+  const t = await start('esp32-iot-esp32-devkit-v1', `#include <ArduinoJson.h>
+void setup() {
+  Serial.begin(115200);
+  const char* s = "{\\"shared\\":{\\"led-state\\":true}}";
+  char p[64];
+  memcpy(p, s, strlen(s));
+  p[strlen(s)] = 0;
+  JsonDocument doc;
+  if (deserializeJson(doc, p)) Serial.println("loi");
+  else { bool led = doc["shared"]["led-state"]; Serial.println(led ? "true" : "false"); }
+}
+void loop() { delay(1000); }`);
+  await wait(80);
+  check('deserializeJson(char[]) stops at NUL', t.out().trim() === 'true', t.out().trim());
   await t.stop();
 }
 console.log(fail ? `${fail} lỗi` : 'Tất cả đều đạt');

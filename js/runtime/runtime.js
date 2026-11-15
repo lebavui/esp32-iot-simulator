@@ -857,7 +857,9 @@ export class Runtime {
       },
       measureJson(doc) { return R.h.serJ(doc, false).length; },
       deserializeJson(doc, input, len) {
-        let s = input instanceof Uint8Array ? bytesToBin(len !== undefined ? input.subarray(0, len) : input) : str(input);
+        // a char array is a C string: without a length it ends at the first NUL (the rest of the buffer is not JSON)
+        const cEnd = (b) => { const i = b.indexOf(0); return i < 0 ? b : b.subarray(0, i); };
+        let s = input instanceof Uint8Array ? bytesToBin(len !== undefined ? input.subarray(0, len) : cEnd(input)) : str(input);
         if (len !== undefined && typeof input === 'string') s = s.slice(0, len);
         return doc.$parse(s);
       },

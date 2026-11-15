@@ -4,7 +4,7 @@ import { Runtime } from './runtime/runtime.js';
 import { Circuit } from './circuit/circuit.js';
 import { DiagramEditor, WIRE_COLORS } from './circuit/editor.js';
 import { PARTS, defaultAttrs } from './circuit/parts.js';
-import { BOARDS, DEFAULT_BOARD } from './boards.js';
+import { BOARDS, DEFAULT_BOARD, LEGACY_BOARDS } from './boards.js';
 import { portProject } from './port.js';
 import { EXAMPLES } from './examples.js';
 import { DEFAULT_BROKERS } from './runtime/libs.js';
@@ -31,7 +31,7 @@ const BLANK_DIAGRAM = { version: 1, parts: [{ type: 'esp32-iot-esp32-devkit-v1',
 
 // ---------------------------------------------------------------- settings
 const settings = Object.assign({ proxy: 'auto', brokers: {}, sound: true, timestamps: false, board: DEFAULT_BOARD, theme: 'dark' }, safeJson(localStorage.getItem(SETTINGS_KEY)) || {});
-if (!BOARDS[settings.board]) settings.board = DEFAULT_BOARD;
+if (!BOARDS[settings.board]) settings.board = LEGACY_BOARDS[settings.board] || DEFAULT_BOARD;
 function saveSettings() { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ proxy: settings.proxy, brokers: settings.brokers, sound: settings.sound, timestamps: settings.timestamps, board: settings.board, theme: settings.theme })); }
 function safeJson(s) { try { return JSON.parse(s); } catch { return null; } }
 
@@ -700,30 +700,57 @@ $('fileInput').onchange = async () => {
   else if (Array.isArray(j.parts)) { editor.load(j); editor.fit(); toast('Đã nạp diagram.json'); }
   else toast('Không nhận dạng được định dạng file');
 };
+// Share links: "#s=<id>" — the project is stored by server.js (POST __share, GET __share/<id>, see share-store.js);
+// "#p=<data>" — the whole project in the link (used when there is no server.js, or it refuses to store the project).
+// Both carry the project JSON compressed with deflate-raw.
+const deflate = async (text) => new Uint8Array(await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer());
+const inflate = async (bytes) => new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
 $('btnShare').onclick = async () => {
   try {
-    const json = JSON.stringify(currentProject());
-    const stream = new Blob([json]).stream().pipeThrough(new CompressionStream('deflate-raw'));
-    const buf = new Uint8Array(await new Response(stream).arrayBuffer());
-    let bin = '';
-    for (const b of buf) bin += String.fromCharCode(b);
-    const b64 = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    const url = location.origin + location.pathname + '#p=' + b64;
-    history.replaceState(null, '', '#p=' + b64);
-    try { await navigator.clipboard.writeText(url); toast('Đã sao chép link chia sẻ vào clipboard'); } catch { window.prompt('Link chia sẻ:', url); }
+    const buf = await deflate(JSON.stringify(currentProject()));
+    let hash = null, note = '';
+    if (settings.proxyAvailable) {
+      try {
+        const r = await fetch('__share', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: buf });
+        const j = await r.json();
+        if (r.ok && j.id) hash = '#s=' + j.id;
+        else note = j.error || 'HTTP ' + r.status;
+      } catch (e) { note = e.message; }
+    }
+    if (!hash) {
+      let bin = '';
+      for (const b of buf) bin += String.fromCharCode(b);
+      hash = '#p=' + btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    const url = location.origin + location.pathname + hash;
+    history.replaceState(null, '', hash);
+    const why = note ? `Không tạo được link ngắn (${note}). ` : '';
+    try { await navigator.clipboard.writeText(url); toast(why + (note ? 'Đã sao chép link dài vào clipboard' : 'Đã sao chép link chia sẻ vào clipboard')); }
+    catch { window.prompt(why + 'Link chia sẻ:', url); }
   } catch (e) { toast('Không tạo được link: ' + e.message); }
 };
 async function loadFromHash() {
+  const s = /#s=([\w-]+)/.exec(location.hash);
+  if (s) {
+    try {
+      const r = await fetch('__share/' + s[1]);
+      if (r.status === 404) { toast('Link chia sẻ không tồn tại hoặc đã hết hạn'); return null; }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return JSON.parse(await inflate(new Uint8Array(await r.arrayBuffer())));
+    } catch (e) { toast('Không tải được dự án chia sẻ: ' + e.message); return null; }
+  }
   const m = /#p=([\w-]+)/.exec(location.hash);
   if (!m) return null;
   try {
-    const b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
-    const bin = atob(b64);
-    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
-    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-    return JSON.parse(await new Response(stream).text());
+    const bin = atob(m[1].replace(/-/g, '+').replace(/_/g, '/'));
+    return JSON.parse(await inflate(Uint8Array.from(bin, (c) => c.charCodeAt(0))));
   } catch { toast('Link chia sẻ bị lỗi'); return null; }
 }
+// a share link pasted into the address bar of an open tab only changes the hash
+window.addEventListener('hashchange', async () => {
+  const shared = await loadFromHash();
+  if (shared) { loadProject(shared); toast('Đã mở dự án từ link chia sẻ'); history.replaceState(null, '', location.pathname); }
+});
 function download(name, content, type) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([content], { type }));

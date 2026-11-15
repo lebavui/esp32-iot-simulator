@@ -334,7 +334,16 @@ export class PubSubClient {
     const map = Object.assign({}, DEFAULT_BROKERS, this.R.settings.brokers || {});
     const h = binToUtf8(this.host || '');
     if (/^wss?:\/\//.test(h)) return h;
-    return map[h] || `wss://${h}:8884/mqtt`;
+    if (map[h]) return map[h];
+    // a broker without a known WebSocket endpoint (e.g. thingsboard.cloud): plain TCP through server.js's bridge
+    const s = this.R.settings;
+    if (s.proxyAvailable && s.proxy !== 'off' && typeof location !== 'undefined') {
+      const u = new URL(`${(s.proxyUrl || '/__proxy').replace(/\/$/, '')}/mqtt`, location.href);
+      u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
+      u.search = `?host=${encodeURIComponent(h)}&port=${this.port}`;
+      return u.href;
+    }
+    return `wss://${h}:8884/mqtt`;
   }
   async connect(id, user, pass, willTopic, willQos, willRetain, willMsg, clean) {
     const R = this.R;
@@ -362,14 +371,18 @@ export class PubSubClient {
       this.queue.push([utf8ToBin(topic), new Uint8Array(payload)]);
     });
     cl.on('close', () => { if (this.st === 0) { this.st = -3; R.io.net('mqtt', 'Mất kết nối MQTT', 'err'); } });
-    cl.on('error', (e) => { R.io.net('mqtt', 'Lỗi MQTT: ' + (e && e.message), 'err'); });
+    let refused = 0; // CONNACK return code 1..5 → PubSubClient state (MQTT_CONNECT_BAD_PROTOCOL … MQTT_CONNECT_UNAUTHORIZED)
+    cl.on('error', (e) => {
+      if (e && e.code >= 1 && e.code <= 5) refused = e.code;
+      R.io.net('mqtt', 'Lỗi MQTT: ' + (e && e.message), 'err');
+    });
     const ok = await R.wait(new Promise((resolve) => {
       const t = setTimeout(() => resolve(false), 10000);
       cl.once('connect', () => { clearTimeout(t); resolve(true); });
       cl.once('error', () => { clearTimeout(t); resolve(false); });
       cl.once('close', () => { clearTimeout(t); resolve(false); });
     }));
-    if (ok) { this.st = 0; R.io.net('mqtt', '✓ MQTT đã kết nối'); } else { this.st = -2; R.io.net('mqtt', '✗ Kết nối MQTT thất bại', 'err'); try { cl.end(true); } catch { /* */ } }
+    if (ok) { this.st = 0; R.io.net('mqtt', '✓ MQTT đã kết nối'); } else { this.st = refused || -2; R.io.net('mqtt', '✗ Kết nối MQTT thất bại', 'err'); try { cl.end(true); } catch { /* */ } }
     return ok;
   }
   connected() { return !!(this.cl && this.cl.connected && this.st === 0); }

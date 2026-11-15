@@ -99,33 +99,33 @@ const ex = (id) => EXAMPLES.find((e) => e.id === id);
   const p = portProject(ex('pir-interrupt'), 'board-xiao-esp32-c3');
   check('pir → XIAO C3: LED_BUILTIN replaced by an external LED', /#define LED_BUILTIN D\d+/.test(p.code) && p.added.length === 1, p.added.join());
 }
-for (const board of ['board-xiao-esp32-c3', 'board-esp32-c3-supermini', 'esp32-iot-esp32-devkit-v1']) {
-  const src = board === 'esp32-iot-esp32-devkit-v1' ? 'xiao-s3-oled' : 'oled';
+for (const board of ['board-xiao-esp32-c3', 'board-xiao-esp32-c6', 'esp32-iot-esp32-devkit-v1']) {
+  const src = board === 'esp32-iot-esp32-devkit-v1' ? 'xiao-c6-oled' : 'oled';
   const p = portProject(ex(src), board);
   const r = await run(p, board, 600);
   const oled = r.parts.find((q) => q.type === 'esp32-iot-ssd1306');
   check(`${src} → ${short(board)}: OLED on the board's I2C pins draws`, oled.state && oled.state.fb.some((v) => v), r.logs.map((l) => l[1]).join(' | '));
 }
 {
-  const p = portProject(ex('pot-pwm'), 'board-esp32-c3-supermini');
-  check('pot-pwm → SuperMini: pot on an ADC1 pin', /const int POT_PIN = [0-4];/.test(p.code), p.code.split('\n').find((l) => /POT_PIN =/.test(l)));
-  const r = await run(p, 'board-esp32-c3-supermini', 500);
-  check('pot-pwm → SuperMini: reads the pot', /\b20[0-9]{2}\b/.test(r.out), r.out.split('\n')[0]);
+  const p = portProject(ex('pot-pwm'), 'board-xiao-esp32-c6');
+  check('pot-pwm → XIAO C6: pot on an ADC pin', /const int POT_PIN = [0-2];/.test(p.code), p.code.split('\n').find((l) => /POT_PIN =/.test(l)));
+  const r = await run(p, 'board-xiao-esp32-c6', 500);
+  check('pot-pwm → XIAO C6: reads the pot', /\b20[0-9]{2}\b/.test(r.out), r.out.split('\n')[0]);
 }
 {
-  const p = portProject(ex('supermini-boot'), 'esp32-iot-esp32-devkit-v1');
+  const p = portProject(ex('xiao-c6-boot'), 'esp32-iot-esp32-devkit-v1');
   const btn = p.diagram.parts.find((q) => q.type === 'esp32-iot-pushbutton');
-  check('supermini-boot → DevKit: BOOT replaced by a push button', !!btn);
+  check('xiao-c6-boot → DevKit: BOOT replaced by a push button', !!btn);
   const r = await run(p, 'esp32-iot-esp32-devkit-v1', 400, (parts, sim, t) => {
     const b = parts.find((q) => q.type === 'esp32-iot-pushbutton');
     if (t > 200 && !b.pressed) { b.pressed = true; sim.invalidate(); }
     return sim.V(parts.find((q) => q.id === 'led1'), 'A') > 1 ? 'on' : 'off';
   });
-  check('supermini-boot → DevKit: button lights the LED', r.seen[0] === 'off' && r.seen.at(-1) === 'on' && /BOOT: nhấn/.test(r.out));
+  check('xiao-c6-boot → DevKit: button lights the LED', r.seen[0] === 'off' && r.seen.at(-1) === 'on' && /BOOT: nhấn/.test(r.out));
 }
 {
-  const p = portProject(ex('xiao-c3-pot'), 'board-xiao-esp32-s3');
-  check('xiao-c3-pot → XIAO S3: keeps D0/D10', p.code === ex('xiao-c3-pot').code && p.diagram.connections.some((c) => c[0] === 'esp:D10'));
+  const p = portProject(ex('xiao-c3-pot'), 'board-xiao-esp32-c6');
+  check('xiao-c3-pot → XIAO C6: keeps D0/D10', p.code === ex('xiao-c3-pot').code && p.diagram.connections.some((c) => c[0] === 'esp:D10'));
 }
 console.log(fail ? `${fail} lỗi` : 'Tất cả đều đạt');
 process.exit(fail ? 1 : 0);
