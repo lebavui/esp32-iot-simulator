@@ -4,7 +4,7 @@
 // moved wires are routed again around the parts (circuit/route.js).
 // DOM-free (used by main.js and tests/t_port.mjs).
 import { BOARDS, isBoard } from './boards.js';
-import { PARTS, defaultAttrs } from './circuit/parts.js';
+import { PARTS, defaultAttrs, migrateDiagram, DIAGRAM_VERSION } from './circuit/parts.js';
 import { routeWires, pinExit } from './circuit/route.js';
 import { CONSTS } from './runtime/meta.js';
 
@@ -79,7 +79,7 @@ function findPinRefs(code, srcType) {
 // route: false skips wire routing (when only the sketch is needed)
 export function portProject(project, target, { route = true } = {}) {
   const tgt = BOARDS[target];
-  const diagram = JSON.parse(JSON.stringify(project.diagram || { version: 1, parts: [], connections: [] }));
+  const diagram = migrateDiagram(JSON.parse(JSON.stringify(project.diagram || { version: DIAGRAM_VERSION, parts: [], connections: [] })));
   let code = project.code || '';
   const out = { code, diagram, changed: false, moves: [], added: [], lost: [], dropped: 0 };
   if (!tgt) return out;

@@ -69,6 +69,8 @@
         <span class="wifi-badge" id="wifiBadge" hidden title="WiFi đã kết nối">📶 WiFi</span>
         <span class="tabs-spacer"></span>
         <button id="btnAddPart" class="add-part" title="Thêm linh kiện">＋ Linh kiện</button>
+        <button id="btnUndo" title="Hoàn tác (Ctrl+Z)" disabled>↶</button>
+        <button id="btnRedo" title="Làm lại (Ctrl+Y / Ctrl+Shift+Z)" disabled>↷</button>
         <button id="btnZoomOut" title="Thu nhỏ">−</button>
         <button id="btnZoomIn" title="Phóng to">＋</button>
         <button id="btnFit" title="Vừa khung">⤢</button>
@@ -76,7 +78,7 @@
       <div class="sim-area">
         <div class="canvas" id="canvas"></div>
         <div class="inspector" id="inspector" hidden></div>
-        <div class="canvas-hint">Kéo thả linh kiện • Bấm vào chân để nối dây • Bấm nền để thêm điểm gấp • Esc hủy • R xoay • Delete xóa</div>
+        <div class="canvas-hint">Kéo thả linh kiện • Bấm vào chân để nối dây • Bấm nền để thêm điểm gấp • Esc hủy • R xoay • Delete xóa • Ctrl+Z hoàn tác</div>
       </div>
       <div class="gutter gutter-h" id="gutterH" title="Kéo để thay đổi kích thước"><button class="gutter-btn" id="btnToggleBottom" title="Thu gọn panel (Ctrl+J)">▾</button></div>
       <div class="bottom" id="bottom">

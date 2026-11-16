@@ -1,5 +1,5 @@
 // Diagram editor: parts placement, wiring, pan/zoom, selection, property inspector.
-import { PARTS, partSize, partPins, defaultAttrs } from './parts.js';
+import { PARTS, partSize, partPins, defaultAttrs, migrateDiagram, DIAGRAM_VERSION } from './parts.js';
 import { routeWires } from './route.js';
 import { LEGACY_BOARDS } from '../boards.js';
 
@@ -31,6 +31,8 @@ export class DiagramEditor {
     this.view = { x: 40, y: 40, z: 1.4 };
     this.sel = null;
     this.wiring = null;
+    this.hist = [];   // undo history: snapshots (JSON strings) of parts + wires
+    this.hpos = -1;
     this.world = document.createElement('div');
     this.world.className = 'world';
     this.partsLayer = document.createElement('div');
@@ -54,7 +56,9 @@ export class DiagramEditor {
   }
 
   // ---------------- model ----------------
-  load(diagram) {
+  // keepHistory: the load is an edit (diagram.json tab, imported file) that can be undone
+  load(diagram, keepHistory) {
+    diagram = migrateDiagram(JSON.parse(JSON.stringify(diagram)));
     this.partsLayer.innerHTML = '';
     this.pinsLayer.innerHTML = '';
     this.wireSvg.innerHTML = '';
@@ -76,11 +80,64 @@ export class DiagramEditor {
     routeWires(this.parts, this.wires);
     this.sync();
     this.select(null);
+    if (keepHistory && this.hist.length) this.record();
+    else { this.hist = [this.snapshot()]; this.hpos = 0; this.historyChanged(); }
+  }
+
+  // ---------------- undo / redo ----------------
+  snapshot() {
+    return JSON.stringify({
+      parts: this.parts.map((p) => ({ type: p.type, id: p.id, x: p.x, y: p.y, rotate: p.rotate || 0, attrs: p.attrs })),
+      wires: this.wires.map((w) => ({ from: w.from, to: w.to, color: w.color, points: w.points || [], manual: !!w.manual })),
+    });
+  }
+  record() {
+    const snap = this.snapshot();
+    if (this.hist[this.hpos] === snap) return;
+    this.hist.length = this.hpos + 1;   // drop the redo branch
+    this.hist.push(snap);
+    if (this.hist.length > 200) this.hist.shift();
+    this.hpos = this.hist.length - 1;
+    this.historyChanged();
+  }
+  canUndo() { return this.hpos > 0; }
+  canRedo() { return this.hpos < this.hist.length - 1; }
+  undo() { if (this.canUndo()) this.restore(this.hist[--this.hpos]); }
+  redo() { if (this.canRedo()) this.restore(this.hist[++this.hpos]); }
+  historyChanged() { this.cb.onHistory && this.cb.onHistory(); }
+
+  // Apply a snapshot in place: parts that still exist keep their objects (and runtime state —
+  // libraries of a running sketch hold references to them), others are added/removed.
+  restore(snap) {
+    const d = JSON.parse(snap);
+    const selPart = this.sel && this.sel.el ? this.sel.id : null;
+    const selWire = this.sel && !this.sel.el ? this.sel.from + '|' + this.sel.to : null;
+    this.wiring = null;
+    const old = new Map(this.parts.map((p) => [p.id, p]));
+    const parts = [];
+    for (const q of d.parts) {
+      let part = old.get(q.id);
+      if (part && part.type === q.type) {
+        old.delete(q.id);
+        Object.assign(part, { x: q.x, y: q.y, rotate: q.rotate, attrs: q.attrs, randBase: null });
+      } else part = { type: q.type, id: q.id, x: q.x, y: q.y, rotate: q.rotate, attrs: q.attrs, state: null };
+      parts.push(part);
+      this.parts = parts;   // renderPart/partSize only look at the part itself
+      this.renderPart(part);
+      this.partsLayer.append(part.el);   // keep the stacking order
+    }
+    for (const p of old.values()) p.el && p.el.remove();
+    this.parts = parts;
+    this.wires = d.wires.map((w) => ({ from: w.from, to: w.to, color: w.color, points: w.points, manual: w.manual }));
+    this.sync();
+    this.select(parts.find((p) => p.id === selPart) || this.wires.find((w) => w.from + '|' + w.to === selWire) || null);
+    this.historyChanged();
+    this.cb.onChange && this.cb.onChange();
   }
 
   serialize() {
     return {
-      version: 1,
+      version: DIAGRAM_VERSION,
       author: 'ESP32 IoT Simulator',
       editor: 'esp32-iot-sim',
       parts: this.parts.map((p) => ({ type: p.type, id: p.id, top: Math.round(p.y), left: Math.round(p.x), rotate: p.rotate || 0, attrs: Object.assign({}, p.attrs) })),
@@ -227,7 +284,7 @@ export class DiagramEditor {
     }
   }
 
-  changed() { this.cb.onChange && this.cb.onChange(); }
+  changed() { this.record(); this.cb.onChange && this.cb.onChange(); }
 
   select(item) {
     const prev = this.sel;
@@ -468,6 +525,12 @@ export class DiagramEditor {
     window.addEventListener('keydown', (e) => {
       const tag = (document.activeElement && document.activeElement.tagName) || '';
       if (/INPUT|TEXTAREA|SELECT/.test(tag) || (document.activeElement && document.activeElement.closest('.CodeMirror'))) return;
+      const k = e.key.toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && (k === 'z' || k === 'y')) {
+        e.preventDefault();
+        if (k === 'y' || e.shiftKey) this.redo(); else this.undo();
+        return;
+      }
       if (e.key === 'Escape' && this.wiring) { this.wiring = null; this.drawWires(); }
       if ((e.key === 'Delete' || e.key === 'Backspace') && this.sel) { e.preventDefault(); this.deleteSelected(); }
       if ((e.key === 'r' || e.key === 'R') && this.sel && this.sel.el && !e.ctrlKey) this.rotateSelected();

@@ -191,34 +191,39 @@ function smallBoard(type, { w, h, pcb, title, sub, shield, antenna, leds }) {
   };
 }
 
+const DEVKIT_PIN_Y = 14; // y of the DevKit V1's first header pin (EN / D23)
+
 export const PARTS = {
   // ---------------------------------------------------------------- ESP32
   'esp32-iot-esp32-devkit-v1': {
     ...boardBehaviour('esp32-iot-esp32-devkit-v1'),
-    size: () => ({ w: 124, h: 262 }),
+    // header pins from y=DEVKIT_PIN_Y; the module, title, LEDs, buttons and USB sit in the column between the headers.
+    // Older diagrams had the pins lower on the part (see migrateDiagram).
+    size: () => ({ w: 124, h: 196 }),
     pins: () => [
-      ...ESP32_LEFT.map((n, i) => ({ name: n, x: 8, y: 60 + i * 12 })),
-      ...ESP32_RIGHT.map((n, i) => ({ name: n, x: 116, y: 60 + i * 12 })),
+      ...ESP32_LEFT.map((n, i) => ({ name: n, x: 8, y: DEVKIT_PIN_Y + i * 12 })),
+      ...ESP32_RIGHT.map((n, i) => ({ name: n, x: 116, y: DEVKIT_PIN_Y + i * 12 })),
     ],
     render() {
       const lbl = (n, x, y, anchor) => `<text x="${x}" y="${y + 2}" text-anchor="${anchor}" class="pl">${n.replace(/\.\d$/, '')}</text>`;
-      let s = `<rect x="0" y="0" width="124" height="262" rx="4" fill="#20232a"/>
-      <rect x="30" y="4" width="64" height="104" rx="2" fill="#2b2f36"/>
-      <path d="M36 9h6v10h4V9h6v10h4V9h6v10h4V9h6v12H36z" fill="none" stroke="#c9a227" stroke-width="1.6"/>
-      <rect x="32" y="26" width="60" height="80" rx="2" fill="#b9bec6" stroke="#8b9099"/>
-      <text x="62" y="52" text-anchor="middle" font-size="7" fill="#444" font-family="monospace">ESP32-WROOM</text>
-      <text x="62" y="62" text-anchor="middle" font-size="5" fill="#555" font-family="monospace">WiFi + BT</text>
-      <circle cx="62" cy="86" r="7" fill="none" stroke="#999"/><text x="62" y="88.5" text-anchor="middle" font-size="5.5" fill="#777">ESP</text>
-      <text x="62" y="140" text-anchor="middle" font-size="7" fill="#d8d8d8" font-family="sans-serif" font-weight="bold">ESP32</text>
-      <text x="62" y="150" text-anchor="middle" font-size="5" fill="#aaa" font-family="sans-serif">DEVKIT V1</text>
-      <rect x="44" y="246" width="36" height="16" rx="2" fill="#c0c4cc" stroke="#888"/>
-      <rect x="14" y="238" width="14" height="10" rx="2" fill="#444"/><circle cx="21" cy="243" r="3" fill="#111"/>
-      <rect x="96" y="238" width="14" height="10" rx="2" fill="#444"/><circle cx="103" cy="243" r="3" fill="#111"/>
-      <text x="21" y="256" text-anchor="middle" font-size="4.5" fill="#bbb">EN</text><text x="103" y="256" text-anchor="middle" font-size="4.5" fill="#bbb">BOOT</text>
-      <rect x="36" y="232" width="6" height="4" fill="#600" class="pwr-led"/><text x="39" y="242" text-anchor="middle" font-size="4" fill="#999">PWR</text>
-      <rect x="82" y="232" width="6" height="4" fill="#123" class="b-led" data-on="#3da5ff" data-off="#123"/><text x="85" y="242" text-anchor="middle" font-size="4" fill="#999">D2</text>`;
-      ESP32_LEFT.forEach((n, i) => { s += `<rect x="3" y="${55 + i * 12}" width="10" height="10" fill="#111" rx="1"/><circle cx="8" cy="${60 + i * 12}" r="2.6" fill="#d4af37"/>` + lbl(n, 16, 60 + i * 12, 'start'); });
-      ESP32_RIGHT.forEach((n, i) => { s += `<rect x="111" y="${55 + i * 12}" width="10" height="10" fill="#111" rx="1"/><circle cx="116" cy="${60 + i * 12}" r="2.6" fill="#d4af37"/>` + lbl(n, 108, 60 + i * 12, 'end'); });
+      const py = (i) => DEVKIT_PIN_Y + i * 12;
+      let s = `<rect x="0" y="0" width="124" height="196" rx="4" fill="#20232a"/>
+      <rect x="30" y="4" width="64" height="88" rx="2" fill="#2b2f36"/>
+      <path d="M36 8h6v10h4V8h6v10h4V8h6v10h4V8h6v12H36z" fill="none" stroke="#c9a227" stroke-width="1.6"/>
+      <rect x="32" y="24" width="60" height="66" rx="2" fill="#b9bec6" stroke="#8b9099"/>
+      <text x="62" y="45" text-anchor="middle" font-size="7" fill="#444" font-family="monospace">ESP32-WROOM</text>
+      <text x="62" y="54" text-anchor="middle" font-size="5" fill="#555" font-family="monospace">WiFi + BT</text>
+      <circle cx="62" cy="75" r="7" fill="none" stroke="#999"/><text x="62" y="77.5" text-anchor="middle" font-size="5.5" fill="#777">ESP</text>
+      <text x="62" y="106" text-anchor="middle" font-size="7" fill="#d8d8d8" font-family="sans-serif" font-weight="bold">ESP32</text>
+      <text x="62" y="115" text-anchor="middle" font-size="5" fill="#aaa" font-family="sans-serif">DEVKIT V1</text>
+      <rect x="40" y="127" width="6" height="4" fill="#600" class="pwr-led"/><text x="43" y="137" text-anchor="middle" font-size="4" fill="#999">PWR</text>
+      <rect x="78" y="127" width="6" height="4" fill="#123" class="b-led" data-on="#3da5ff" data-off="#123"/><text x="81" y="137" text-anchor="middle" font-size="4" fill="#999">D2</text>
+      <rect x="36" y="146" width="14" height="10" rx="2" fill="#444"/><circle cx="43" cy="151" r="3" fill="#111"/>
+      <rect x="74" y="146" width="14" height="10" rx="2" fill="#444"/><circle cx="81" cy="151" r="3" fill="#111"/>
+      <text x="43" y="164" text-anchor="middle" font-size="4.5" fill="#bbb">EN</text><text x="81" y="164" text-anchor="middle" font-size="4.5" fill="#bbb">BOOT</text>
+      <rect x="44" y="180" width="36" height="16" rx="2" fill="#c0c4cc" stroke="#888"/>`;
+      ESP32_LEFT.forEach((n, i) => { s += `<rect x="3" y="${py(i) - 5}" width="10" height="10" fill="#111" rx="1"/><circle cx="8" cy="${py(i)}" r="2.6" fill="#d4af37"/>` + lbl(n, 16, py(i), 'start'); });
+      ESP32_RIGHT.forEach((n, i) => { s += `<rect x="111" y="${py(i) - 5}" width="10" height="10" fill="#111" rx="1"/><circle cx="116" cy="${py(i)}" r="2.6" fill="#d4af37"/>` + lbl(n, 108, py(i), 'end'); });
       return s;
     },
   },
@@ -766,23 +771,27 @@ export const PARTS = {
     attrs: [{ key: 'size', label: 'Kích thước', type: 'select', options: ['16x2', '20x4'], default: '16x2' },
       { key: 'address', label: 'Địa chỉ I2C', type: 'select', options: ['0x27', '0x3F'], default: '0x27' },
       { key: 'color', label: 'Màu nền', type: 'select', options: ['green', 'blue'], default: 'green' }],
-    size(attrs) { const [c, r] = (attrs.size || '16x2').split('x').map(Number); return { w: c * 12 + 60, h: r * 19 + 48 }; },
+    size(attrs) { const [c, r] = (attrs.size || '16x2').split('x').map(Number); return { w: c * 12 + 67, h: r * 19 + 48 }; },
     pins(attrs) { const h = this.size(attrs).h; return rowPins(['GND', 'VCC', 'SDA', 'SCL'], 0, 0, 0).map((p, i) => ({ name: p.name, x: 3, y: h / 2 - 15 + i * 10 })); },
+    // LCD glass (sw×sh at sx,sy); its black frame starts at x=33, just right of the pin labels (x < 29)
+    screen(attrs) {
+      const { h } = this.size(attrs);
+      const [c, r] = (attrs.size || '16x2').split('x').map(Number);
+      const sw = c * 12 + 8, sh = r * 19 + 8;
+      return { sx: 41, sy: (h - sh) / 2, sw, sh };
+    },
     render(part) {
       const { w, h } = this.size(part.attrs);
-      const [c, r] = (part.attrs.size || '16x2').split('x').map(Number);
-      const sw = c * 12 + 8, sh = r * 19 + 8;
+      const { sx, sy, sw, sh } = this.screen(part.attrs);
       const pinsY = this.pins(part.attrs);
       return `<rect x="8" y="0" width="${w - 8}" height="${h}" rx="3" fill="#1b6b2a"/>
       ${[[14, 4], [w - 6, 4], [14, h - 4], [w - 6, h - 4]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="2.6" fill="#ccc"/>`).join('')}
       ${pinsY.map((p) => `<line x1="0" y1="${p.y}" x2="14" y2="${p.y}" stroke="#d4af37" stroke-width="2"/><text x="17" y="${p.y + 2}" font-size="5" fill="#fff">${p.name}</text>`).join('')}
-      <rect x="${(w + 8 - sw) / 2 - 8}" y="${(h - sh) / 2 - 8}" width="${sw + 16}" height="${sh + 16}" rx="2" fill="#111"/>`;
+      <rect x="${sx - 8}" y="${sy - 8}" width="${sw + 16}" height="${sh + 16}" rx="2" fill="#111"/>`;
     },
     canvas(part) {
-      const { w, h } = this.size(part.attrs);
-      const [c, r] = (part.attrs.size || '16x2').split('x').map(Number);
-      const sw = c * 12 + 8, sh = r * 19 + 8;
-      return { x: (w + 8 - sw) / 2, y: (h - sh) / 2, w: sw, h: sh, scale: 3 };
+      const { sx, sy, sw, sh } = this.screen(part.attrs);
+      return { x: sx, y: sy, w: sw, h: sh, scale: 3 };
     },
     draw(part, ctx2d, powered) {
       const [cols, rows] = (part.attrs.size || '16x2').split('x').map(Number);
@@ -843,9 +852,9 @@ export const PARTS = {
       return `<rect x="0" y="0" width="140" height="100" rx="4" fill="#1a3b8c"/>
       ${[6, 134].map((x) => [6, 94].map((y) => `<circle cx="${x}" cy="${y}" r="3" fill="#dde"/>`).join('')).join('')}
       ${['GND', 'VCC', 'SCL', 'SDA'].map((n, i) => `<circle cx="${49 + i * 14}" cy="3" r="2.6" fill="#d4af37"/><text x="${49 + i * 14}" y="13" text-anchor="middle" font-size="5" fill="#fff">${n}</text>`).join('')}
-      <rect x="4" y="16" width="132" height="80" rx="1" fill="#0b0b0b"/>`;
+      <rect x="4" y="17" width="132" height="72" rx="1" fill="#0b0b0b"/>`;
     },
-    canvas: () => ({ x: 6, y: 24, w: 128, h: 64, scale: 2 }),
+    canvas: () => ({ x: 6, y: 21, w: 128, h: 64, scale: 2 }), // inside the frame, clear of the mounting holes (y ≥ 91)
     draw(part, ctx2d, powered) {
       const st = part.state;
       const W = 128, H = 64, S = 2;
@@ -926,5 +935,47 @@ export function defaultAttrs(type) {
   const o = {};
   for (const a of PARTS[type].attrs || []) if (a.default !== undefined) o[a.key] = a.default;
   return o;
+}
+// Sensor attributes that can auto-generate random values (live ranges of 'Cảm biến' parts);
+// enabled per part by attrs.random.
+export function randomAttrs(type) {
+  const def = PARTS[type];
+  if (!def || def.category !== 'Cảm biến') return [];
+  return (def.attrs || []).filter((a) => a.type === 'range' && a.live);
+}
+// One step of a bounded random walk around part.randBase (the value set by the user, kept off
+// the saved attrs): steps of ~1% of the range, drifting within ±5% of the range around the base.
+export function randomizeSensor(part, rnd = Math.random) {
+  const list = randomAttrs(part.type);
+  if (!part.attrs.random || !list.length) return false;
+  part.randBase = part.randBase || {};
+  for (const a of list) {
+    const span = a.max - a.min;
+    const cur = Number(part.attrs[a.key] ?? a.default);
+    const base = part.randBase[a.key] ?? (part.randBase[a.key] = cur);
+    let v = cur + (base - cur) * 0.15 + (rnd() * 2 - 1) * span * 0.012;
+    v = Math.max(a.min, base - span * 0.05, Math.min(a.max, base + span * 0.05, v));
+    const step = a.step || 1;
+    v = Math.round(v / step) * step;
+    part.attrs[a.key] = Number(v.toFixed(step < 1 ? String(step).split('.')[1].length : 0));
+  }
+  return true;
+}
+// Diagram format versions = where the DevKit V1's first header pin is on the part: 1 (or none) y=60, 2 y=44,
+// 3 y=14 (current). An older diagram's DevKit is moved down by the difference so its pins (and wires with
+// hand-placed bends) stay where they were. Idempotent: the result has the current version.
+export const DIAGRAM_VERSION = 3;
+const DEVKIT_PIN_Y_OF_VERSION = { 1: 60, 2: 44, 3: DEVKIT_PIN_Y };
+export function migrateDiagram(d) {
+  if (!d || typeof d !== 'object') return d;
+  const v = Math.max(1, Math.min(DIAGRAM_VERSION, Math.floor(Number(d.version)) || 1));
+  const dy = DEVKIT_PIN_Y_OF_VERSION[v] - DEVKIT_PIN_Y;
+  if (dy) {
+    for (const p of d.parts || []) {
+      if (String(p.type).replace(/^wokwi-/, 'esp32-iot-') === 'esp32-iot-esp32-devkit-v1') p.top = (Number(p.top) || 0) + dy;
+    }
+  }
+  d.version = DIAGRAM_VERSION;
+  return d;
 }
 export { esc };

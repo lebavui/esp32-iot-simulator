@@ -219,6 +219,8 @@ code { background: var(--code); padding: 0 4px; border-radius: 3px; }
 .inspector .sub { color: var(--muted); font-size: 11.5px; margin-bottom: 8px; font-family: Consolas, monospace; }
 .inspector .field { display: flex; flex-direction: column; gap: 3px; margin: 8px 0; font-size: 12px; color: var(--muted); }
 .inspector .field input, .inspector .field select { width: 100%; }
+.inspector .field.check { flex-direction: row; align-items: center; gap: 6px; color: var(--text); cursor: pointer; }
+.inspector .field.check input { width: auto; margin: 0; }
 .inspector .field .val { color: var(--text); font-family: Consolas, monospace; }
 .inspector .row { display: flex; gap: 6px; margin-top: 10px; }
 .inspector .row button { flex: 1; }

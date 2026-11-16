@@ -1,6 +1,8 @@
 // Example projects: Arduino sketch + diagram (diagram.json format).
 // ESP32 is at (0,0). Right header pins x=116: D23 y60, D22 72, TX0 84, RX0 96, D21 108, D19 120, D18 132, D5 144,
 // TX2 156, RX2 168, D4 180, D2 192, D15 204, GND.2 216, 3V3 228. Left header x=8: VP 72 ... GND.1 216, VIN 228.
+// These diagrams are 'version: 1': on load (migrateDiagram) the DevKit, whose pins now start 46 px higher on the
+// part, is moved to top 46, so the pin coordinates above stay valid.
 
 const ESP = { type: 'esp32-iot-esp32-devkit-v1', id: 'esp', top: 0, left: 0, attrs: {} };
 const C = (from, to, color, points) => (points ? [from, to, color, points] : [from, to, color]);

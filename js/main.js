@@ -3,7 +3,7 @@ import { compile } from './compiler/compile.js';
 import { Runtime } from './runtime/runtime.js';
 import { Circuit } from './circuit/circuit.js';
 import { DiagramEditor, WIRE_COLORS } from './circuit/editor.js';
-import { PARTS, defaultAttrs } from './circuit/parts.js';
+import { PARTS, defaultAttrs, randomAttrs, randomizeSensor } from './circuit/parts.js';
 import { BOARDS, DEFAULT_BOARD, LEGACY_BOARDS } from './boards.js';
 import { portProject } from './port.js';
 import { EXAMPLES } from './examples.js';
@@ -27,7 +27,7 @@ void loop() {
   delay(10);
 }
 `;
-const BLANK_DIAGRAM = { version: 1, parts: [{ type: 'esp32-iot-esp32-devkit-v1', id: 'esp', top: 0, left: 0, attrs: {} }], connections: [] };
+const BLANK_DIAGRAM = { version: 3, parts: [{ type: 'esp32-iot-esp32-devkit-v1', id: 'esp', top: 0, left: 0, attrs: {} }], connections: [] };
 
 // ---------------------------------------------------------------- settings
 const settings = Object.assign({ proxy: 'auto', brokers: {}, sound: true, timestamps: false, board: DEFAULT_BOARD, theme: 'dark' }, safeJson(localStorage.getItem(SETTINGS_KEY)) || {});
@@ -76,6 +76,7 @@ let needsRender = true;
 const editor = new DiagramEditor($('canvas'), circuit, {
   onChange: () => { needsRender = true; scheduleSave(); syncBoardSelect(); if (activeCodeTab === 'diagram' && !cm.hasFocus()) diagramDoc.setValue(diagramText()); },
   onSelect: (item) => renderInspector(item),
+  onHistory: () => { $('btnUndo').disabled = !editor.canUndo(); $('btnRedo').disabled = !editor.canRedo(); },
   isRunning: () => running,
   onInteract: (part, phase) => interact(part, phase),
   toast,
@@ -130,13 +131,13 @@ function diagramText() {
   const d = editor.serialize();
   const parts = d.parts.map((p) => '    ' + JSON.stringify(p)).join(',\n');
   const conns = d.connections.map((c) => '    ' + JSON.stringify(c)).join(',\n');
-  return `{\n  "version": 1,\n  "author": ${JSON.stringify(d.author)},\n  "editor": "esp32-iot-sim",\n  "parts": [\n${parts}\n  ],\n  "connections": [\n${conns}\n  ]\n}\n`;
+  return `{\n  "version": ${d.version},\n  "author": ${JSON.stringify(d.author)},\n  "editor": "esp32-iot-sim",\n  "parts": [\n${parts}\n  ],\n  "connections": [\n${conns}\n  ]\n}\n`;
 }
 function applyDiagramText() {
   const d = safeJson(diagramDoc.getValue());
   if (!d || !Array.isArray(d.parts)) { toast('diagram.json không hợp lệ — giữ nguyên sơ đồ hiện tại'); return false; }
   const before = JSON.stringify(editor.serialize());
-  if (JSON.stringify(d) !== before) { editor.load(d); needsRender = true; scheduleSave(); syncBoardSelect(); }
+  if (JSON.stringify(d) !== before) { editor.load(d, true); needsRender = true; scheduleSave(); syncBoardSelect(); }
   return true;
 }
 
@@ -412,6 +413,22 @@ function stop(silent) {
   needsRender = true;
 }
 
+// sensors with "Tự sinh giá trị ngẫu nhiên" checked drift randomly once a second while running
+setInterval(() => {
+  if (!running) return;
+  let n = 0;
+  for (const part of editor.parts) {
+    if (!randomizeSensor(part)) continue;
+    n++;
+    if (editor.sel === part) {
+      for (const el of $('inspector').querySelectorAll('input[data-key]')) {
+        if (document.activeElement !== el) el.value = part.attrs[el.dataset.key];
+      }
+    }
+  }
+  if (n) { circuit.invalidate(); needsRender = true; }
+}, 1000);
+
 $('btnRun').onclick = run;
 $('btnStop').onclick = () => stop();
 $('btnRestart').onclick = run;
@@ -521,9 +538,12 @@ function renderInspector(item) {
       const num = document.createElement('input');
       Object.assign(num, { type: 'number', min: a.min, max: a.max, step: a.step || 1, value: val });
       num.style.width = '90px';
-      input.oninput = () => { num.value = input.value; editor.setAttr(item, a.key, Number(input.value), true); needsRender = true; };
+      input.dataset.key = num.dataset.key = a.key;
+      // a value set by hand becomes the new centre of the random walk
+      const setBase = (v) => { if (item.randBase) item.randBase[a.key] = v; };
+      input.oninput = () => { num.value = input.value; setBase(Number(input.value)); editor.setAttr(item, a.key, Number(input.value), true); needsRender = true; };
       input.onchange = () => editor.changed();
-      num.onchange = () => { input.value = num.value; editor.setAttr(item, a.key, Number(num.value)); needsRender = true; };
+      num.onchange = () => { input.value = num.value; setBase(Number(num.value)); editor.setAttr(item, a.key, Number(num.value)); needsRender = true; };
       const row = document.createElement('div');
       row.style.display = 'flex'; row.style.gap = '6px'; row.style.alignItems = 'center';
       row.append(input, num);
@@ -541,6 +561,21 @@ function renderInspector(item) {
       input.onchange = () => { editor.setAttr(item, a.key, a.type === 'number' ? Number(input.value) : input.value); needsRender = true; };
       f.append(a.label, input);
     }
+    box.append(f);
+  }
+  if (randomAttrs(item.type).length) {
+    const f = document.createElement('label');
+    f.className = 'field check';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!item.attrs.random;
+    cb.onchange = () => {
+      item.randBase = null;
+      if (cb.checked) item.attrs.random = true; else delete item.attrs.random;
+      editor.changed();
+    };
+    f.title = 'Khi đang chạy, giá trị cảm biến dao động ngẫu nhiên quanh giá trị đã đặt (cập nhật mỗi giây)';
+    f.append(cb, 'Tự sinh giá trị ngẫu nhiên');
     box.append(f);
   }
   if (def.interactive && def.board) box.insertAdjacentHTML('beforeend', `<div class="field" style="font-size:11px">Khi đang chạy: nhấn giữ chuột lên board để nhấn nút BOOT (GPIO${BOARDS[item.type].boot.gpio}).</div>`);
@@ -600,6 +635,8 @@ $('partSearch').oninput = openPalette;
 $('btnZoomIn').onclick = () => { const r = $('canvas').getBoundingClientRect(); editor.zoomAt(1.2, r.width / 2, r.height / 2); };
 $('btnZoomOut').onclick = () => { const r = $('canvas').getBoundingClientRect(); editor.zoomAt(1 / 1.2, r.width / 2, r.height / 2); };
 $('btnFit').onclick = () => editor.fit();
+$('btnUndo').onclick = () => editor.undo();
+$('btnRedo').onclick = () => editor.redo();
 
 // ---------------------------------------------------------------- board
 const boardSel = $('boardSelect');
@@ -697,7 +734,7 @@ $('fileInput').onchange = async () => {
   const j = safeJson(text);
   if (!j) { toast('File không hợp lệ'); return; }
   if (j.code !== undefined) loadProject(j);
-  else if (Array.isArray(j.parts)) { editor.load(j); editor.fit(); toast('Đã nạp diagram.json'); }
+  else if (Array.isArray(j.parts)) { editor.load(j, true); editor.fit(); toast('Đã nạp diagram.json'); }
   else toast('Không nhận dạng được định dạng file');
 };
 // Share links: "#s=<id>" — the project is stored by server.js (POST __share, GET __share/<id>, see share-store.js);
