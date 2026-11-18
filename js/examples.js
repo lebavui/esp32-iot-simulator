@@ -2994,6 +2994,299 @@ void loop() {
     diagram: compose(LED_D4, dhtAt(300, 120)),
   },
   {
+    id: 'wifi-manager', name: 'WiFi Manager: phát AP + web cấu hình WiFi, giữ BOOT 5 s để cài lại', category: 'Kết nối',
+    code: `// Cấu hình WiFi qua trang web (WiFi Manager), log hiển thị trên OLED (I2C) và Serial.
+//  - Chưa có cấu hình (hoặc không kết nối được): board phát WiFi ở chế độ AP ("ESP32-xxxx", mật khẩu 12345678)
+//    và chạy HTTP server ở 192.168.4.1: trang web liệt kê các mạng quét được, nhập SSID + mật khẩu rồi bấm Lưu.
+//  - Lưu xong: cấu hình được ghi vào flash (Preferences), board tự khởi động lại và kết nối vào mạng đã chọn.
+//  - Nhấn giữ nút BOOT 5 giây (khi chạy: nhấn giữ chuột lên nút BOOT trên board): xóa cấu hình WiFi và khởi
+//    động lại -> board mở lại chế độ AP.
+// Trong trình giả lập: trình duyệt đóng vai điện thoại kết nối vào AP của board — khi board phát WiFi, mở link
+// .../__dev/192.168.4.1/ trong tab "Mạng" ở tab trình duyệt mới. Các mạng có khóa (ESP32-Lab, IoT-Class,
+// CafeWiFi) dùng mật khẩu 12345678 — thử nhập sai để xem board quay lại chế độ AP; "ESP32-IoT-GUEST" là mạng mở.
+#include <WiFi.h>
+#include <WebServer.h>
+#include <Preferences.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define BOOT_PIN 0                       // nút BOOT trên board (nhấn = LOW)
+#define AP_PASS "12345678"               // mật khẩu WiFi do board phát (8-63 ký tự)
+const unsigned long CONNECT_TIMEOUT = 15000;  // quá thời gian này mà chưa kết nối được -> mở chế độ AP
+const unsigned long RESET_HOLD = 5000;        // giữ BOOT bao lâu thì xóa cấu hình
+
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+WebServer server(80);
+Preferences prefs;
+
+String ssid, pass;          // cấu hình đã lưu
+String apSsid;              // tên WiFi do board phát
+String networks;            // <option> các mạng quét được, chèn vào trang web
+bool apMode = false;
+unsigned long restartAt = 0;
+int stations = 0;
+
+// ---------------------------------------------------------------- log: Serial + OLED
+// OLED 128x64, chữ cỡ 1 (21 ký tự/dòng): dòng tiêu đề + 6 dòng log cuối cùng (chữ không dấu)
+const int LOG_LINES = 6;
+const int LINE_CHARS = 21;
+String logBuf[LOG_LINES];
+int logCount = 0;
+String title = "WiFi Manager";
+
+void drawOled() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.print(title);
+  display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
+  for (int i = 0; i < logCount; i++) {
+    display.setCursor(0, 14 + i * 8);
+    display.print(logBuf[i]);
+  }
+  display.display();
+}
+
+void addLine(String s) {
+  if (logCount == LOG_LINES) {            // đầy: cuộn lên một dòng
+    for (int i = 1; i < LOG_LINES; i++) logBuf[i - 1] = logBuf[i];
+    logCount--;
+  }
+  logBuf[logCount++] = s;
+}
+
+void logMsg(String msg) {
+  Serial.printf("[%7.1f s] %s\\n", millis() / 1000.0, msg.c_str());
+  for (unsigned int i = 0; i < msg.length(); i += LINE_CHARS) addLine(msg.substring(i, i + LINE_CHARS));
+  drawOled();
+}
+
+void setTitle(String t) {
+  title = t;
+  drawOled();
+}
+
+// ---------------------------------------------------------------- cấu hình trong flash
+void loadConfig() {
+  prefs.begin("wifi-cfg", true);
+  ssid = prefs.getString("ssid", "");
+  pass = prefs.getString("pass", "");
+  prefs.end();
+}
+
+void saveConfig(String s, String p) {
+  prefs.begin("wifi-cfg", false);
+  prefs.putString("ssid", s);
+  prefs.putString("pass", p);
+  prefs.end();
+}
+
+void clearConfig() {
+  prefs.begin("wifi-cfg", false);
+  prefs.clear();
+  prefs.end();
+}
+
+// ---------------------------------------------------------------- nút BOOT: giữ 5 s -> xóa cấu hình, khởi động lại
+unsigned long bootDown = 0;
+int bootShown = 0;
+
+void checkBoot() {
+  if (digitalRead(BOOT_PIN) == LOW) {
+    if (bootDown == 0) {
+      bootDown = millis();
+      bootShown = 0;
+      logMsg("BOOT: giu 5s de reset");
+    }
+    unsigned long held = millis() - bootDown;
+    int sec = held / 1000;
+    if (sec > bootShown && held < RESET_HOLD) {
+      bootShown = sec;
+      logMsg("BOOT: " + String(sec) + "s...");
+    }
+    if (held >= RESET_HOLD) {
+      logMsg("Xoa cau hinh WiFi!");
+      logMsg("Khoi dong lai -> AP");
+      clearConfig();
+      delay(1000);
+      ESP.restart();
+    }
+  } else if (bootDown != 0) {
+    if (millis() - bootDown < RESET_HOLD) logMsg("Nha BOOT: huy reset");
+    bootDown = 0;
+  }
+}
+
+// ---------------------------------------------------------------- trang web cấu hình (chế độ AP)
+const char PAGE_HEAD[] = R"rawliteral(<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cấu hình WiFi</title>
+<style>body{font-family:sans-serif;max-width:420px;margin:20px auto;padding:0 12px;color:#222}
+.card{border:1px solid #ccc;border-radius:8px;padding:12px;margin:12px 0}
+label{display:block;margin:10px 0 2px}input,select{width:100%;padding:7px;box-sizing:border-box}
+button{padding:9px 16px;margin-top:12px}small{color:#666}</style></head><body>
+<h2>📶 Cấu hình WiFi</h2>)rawliteral";
+
+const char PAGE_FORM[] = R"rawliteral(<form class="card" method="POST" action="/save">
+<label>Mạng WiFi quét được</label>
+<select onchange="if(this.value)document.getElementById('ssid').value=this.value">
+<option value="">-- chọn mạng --</option>%NETWORKS%</select>
+<label>Tên mạng (SSID)</label><input id="ssid" name="ssid" value="%SSID%" maxlength="32" required>
+<label>Mật khẩu</label><input name="pass" type="password" maxlength="63" placeholder="để trống nếu mạng mở">
+<button type="submit">Lưu &amp; kết nối</button></form>
+<p><small>Thiết bị: %AP% · MAC %MAC%<br>Giữ nút BOOT 5 giây để xóa cấu hình và mở lại trang này.</small></p>
+</body></html>)rawliteral";
+
+void scanNetworks() {
+  logMsg("Quet mang WiFi...");
+  int n = WiFi.scanNetworks();
+  networks = "";
+  for (int i = 0; i < n; i++) {
+    String name = WiFi.SSID(i);
+    networks += "<option value=\\"" + name + "\\">" + name + " (" + String(WiFi.RSSI(i)) + " dBm" +
+                (WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "" : ", có khóa") + ")</option>";
+  }
+  logMsg("Tim thay " + String(n) + " mang");
+}
+
+void handleRoot() {
+  String html = PAGE_HEAD;
+  if (ssid.length() > 0) html += "<p class=\\"card\\">⚠ Không kết nối được tới <b>" + ssid + "</b>. Kiểm tra lại mật khẩu.</p>";
+  html += PAGE_FORM;
+  html.replace("%NETWORKS%", networks);
+  html.replace("%SSID%", ssid);
+  html.replace("%AP%", apSsid);
+  html.replace("%MAC%", WiFi.macAddress());
+  server.send(200, "text/html", html);
+}
+
+void handleSave() {
+  String s = server.arg("ssid");
+  s.trim();
+  String p = server.arg("pass");
+  if (s.length() == 0) {
+    server.send(400, "text/plain", "Thiếu tên mạng (SSID)");
+    return;
+  }
+  if (p.length() > 0 && p.length() < 8) {
+    server.send(400, "text/plain", "Mật khẩu WiFi phải có ít nhất 8 ký tự");
+    return;
+  }
+  saveConfig(s, p);
+  String html = PAGE_HEAD;
+  html += "<div class=\\"card\\">✅ Đã lưu cấu hình. Thiết bị khởi động lại và kết nối tới <b>" + s +
+          "</b>.<br><small>Có thể đóng trang này. Nếu không kết nối được, thiết bị sẽ phát lại WiFi <b>" +
+          apSsid + "</b>.</small></div></body></html>";
+  server.send(200, "text/html", html);
+  logMsg("Da luu: " + s);
+  logMsg("Khoi dong lai sau 2s");
+  restartAt = millis() + 2000;            // để trang web kịp nhận phản hồi rồi mới khởi động lại
+}
+
+// trang không tồn tại -> chuyển về trang cấu hình (giống captive portal)
+void handleNotFound() {
+  server.sendHeader("Location", "/");
+  server.send(302, "text/plain", "");
+}
+
+void startAP() {
+  apMode = true;
+  WiFi.disconnect();
+  WiFi.mode(WIFI_AP_STA);                 // STA để quét mạng, AP để phát WiFi
+  scanNetworks();
+  if (!WiFi.softAP(apSsid.c_str(), AP_PASS)) {
+    logMsg("Loi phat WiFi (softAP)!");
+    return;
+  }
+  setTitle("AP " + apSsid);
+  logMsg("Phat WiFi: " + apSsid);
+  logMsg("Mat khau: " AP_PASS);
+  logMsg("Mo http://" + WiFi.softAPIP().toString());
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/save", HTTP_POST, handleSave);
+  server.onNotFound(handleNotFound);
+  server.begin();
+}
+
+// ---------------------------------------------------------------- kết nối mạng đã lưu (chế độ STA)
+bool connectWiFi() {
+  setTitle("STA " + ssid);
+  logMsg("Ket noi: " + ssid);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid.c_str(), pass.c_str());
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    if (WiFi.status() == WL_CONNECT_FAILED) {
+      logMsg("Sai mat khau!");
+      return false;
+    }
+    if (millis() - start > CONNECT_TIMEOUT) {
+      logMsg("Het thoi gian cho!");
+      return false;
+    }
+    checkBoot();                          // vẫn cho phép giữ BOOT để reset khi đang chờ
+    delay(100);
+  }
+  logMsg("Da ket noi WiFi!");
+  logMsg("IP " + WiFi.localIP().toString());
+  logMsg("RSSI " + String(WiFi.RSSI()) + " dBm");
+  return true;
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(BOOT_PIN, INPUT_PULLUP);
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) Serial.println("Khong tim thay OLED 0x3C!");
+  String mac = WiFi.macAddress();         // "24:0A:C4:12:AB:CD" -> "ESP32-ABCD"
+  apSsid = "ESP32-" + mac.substring(12, 14) + mac.substring(15, 17);
+  logMsg("Khoi dong...");
+
+  loadConfig();
+  if (ssid.length() == 0) {
+    logMsg("Chua cau hinh WiFi");
+    startAP();
+  } else if (!connectWiFi()) {
+    logMsg("-> Mo che do AP");
+    startAP();
+  }
+}
+
+void loop() {
+  checkBoot();
+  if (apMode) {
+    server.handleClient();
+    int n = WiFi.softAPgetStationNum();
+    if (n != stations) {
+      stations = n;
+      logMsg(n > 0 ? "Co thiet bi ket noi" : "Thiet bi da roi AP");
+    }
+    if (restartAt != 0 && millis() >= restartAt) {
+      WiFi.softAPdisconnect(true);
+      ESP.restart();
+    }
+  } else {
+    static unsigned long lastCheck = 0;
+    static bool online = true;
+    if (millis() - lastCheck >= 10000) {  // kiểm tra kết nối mỗi 10 giây
+      lastCheck = millis();
+      bool now = WiFi.status() == WL_CONNECTED;
+      if (now && !online) logMsg("Da ket noi lai WiFi");
+      if (!now && online) {
+        logMsg("Mat WiFi, ket noi lai");
+        WiFi.reconnect();
+      }
+      online = now;
+      if (now) Serial.printf("WiFi %s, IP %s, RSSI %d dBm\\n", ssid.c_str(), WiFi.localIP().toString().c_str(), WiFi.RSSI());
+    }
+  }
+  delay(10);
+}
+`,
+    diagram: diagram(OLED_PARTS, OLED_CONNS),
+  },
+  {
     id: 'freertos-queue', name: 'FreeRTOS: gửi & nhận dữ liệu đồng thời (queue, mutex)', category: 'FreeRTOS',
     code: `// Ba task FreeRTOS chạy đồng thời:
 //  - taskSensor : đọc DHT22 mỗi 2 giây, đẩy kết quả vào hàng đợi (queue) — không đụng tới mạng
@@ -3138,7 +3431,7 @@ const CATALOG = [
     ['http-post', 'HTTP POST: gửi dữ liệu cảm biến lên ThingsBoard'],
     ['mqtt', 'MQTT ThingsBoard: gửi DHT22, điều khiển LED'],
     ['coap-client', 'CoAP ThingsBoard: gửi DHT22, điều khiển LED'],
-    ['webserver-config', 'HTTP server: trang web cấu hình thiết bị'],
+    ['wifi-manager', 'WiFi Manager: phát AP + web cấu hình WiFi, giữ BOOT 5 s để cài lại'],
   ]],
   ['FreeRTOS', [
     ['freertos', 'Nhấp nháy 2 LED với chu kỳ khác nhau'],

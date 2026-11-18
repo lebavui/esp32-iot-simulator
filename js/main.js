@@ -395,7 +395,7 @@ function run() {
         if (level === 'error' && line) { showProblems([{ type: 'error', line, msg }]); }
       },
       net: netLog,
-      wifi: (on) => { $('wifiBadge').hidden = !on; },
+      wifi: (on, label) => { const b = $('wifiBadge'); b.hidden = !on; b.textContent = label || '📶 WiFi'; },
       restart: () => setTimeout(() => { sysLog('info', '— Board khởi động lại —'); run(); }, 50),
       onStopped: (fromError) => { if (rt === runtime) { setRunningUI(false, fromError ? 'Dừng do lỗi' : 'Đã dừng', fromError ? 'error' : ''); stopSounds(); } },
     },

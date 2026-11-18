@@ -101,31 +101,65 @@ export class IPAddress {
 IPAddress.meta = { ret: { toString: 'String', fromString: 'bool' } };
 
 // ---------------------------------------------------------------- WiFi
+// the simulated networks seen by scanNetworks(): [ssid, rssi, encryption]; the secured ones accept SECURED_PASS,
+// any other SSID connects to the virtual AP whatever the password
+const NETWORKS = [['ESP32-IoT-GUEST', -42, 0], ['ESP32-Lab', -58, 3], ['IoT-Class', -67, 3], ['CafeWiFi', -80, 3]];
+export const SECURED_PASS = '12345678';
+export const AP_DEFAULT_IP = '192.168.4.1';
+
 export class WiFiClass {
   constructor(R) { this.R = R; this.hostname = 'esp32-arduino'; this.$mode = 1; }
   get st() { return this.R.wifi; }
-  mode(m) { this.$mode = m; return true; }
+  // WIFI_OFF / WIFI_STA / WIFI_AP / WIFI_AP_STA: leaving a mode turns that interface off
+  mode(m) {
+    m |= 0;
+    if (!(m & 1) && this.st.status === 3) this.disconnect();
+    if (!(m & 2) && this.st.ap) this.softAPdisconnect();
+    this.$mode = m;
+    return true;
+  }
   getMode() { return this.$mode; }
+  $badge() {
+    const sta = this.st.status === 3, ap = !!this.st.ap;
+    this.R.io.wifi(sta || ap, sta && ap ? '📶 WiFi + 📡 AP' : ap ? '📡 AP' : '📶 WiFi');
+  }
   begin(ssid, pass) {
     const R = this.R;
     ssid = ssid === undefined ? this.st.ssid : R.h.str(ssid);
+    pass = pass === undefined || pass === null ? (this.$pass || '') : R.h.str(pass);
     this.st.ssid = ssid;
+    this.$pass = pass;
+    this.$mode |= 1;
+    clearTimeout(this.$joinTimer);
+    const name = binToUtf8(ssid);
+    if (!name) { this.st.status = 1; R.io.net('wifi', '✗ WiFi.begin: SSID rỗng', 'err'); return this.st.status; }
     this.st.status = 6;
-    R.io.net('wifi', `Đang kết nối WiFi "${binToUtf8(ssid)}"...`);
-    const id = setTimeout(() => {
+    R.io.net('wifi', `Đang kết nối WiFi "${name}"...`);
+    const net = NETWORKS.find((n) => n[0] === name);
+    const ok = !net || !net[2] || binToUtf8(pass) === SECURED_PASS;
+    this.$joinTimer = setTimeout(() => {
       if (R.stopped) return;
+      if (!ok) {
+        this.st.status = 4;
+        R.io.net('wifi', `✗ Không kết nối được "${name}": sai mật khẩu (mạng ảo có bảo mật dùng mật khẩu ${SECURED_PASS})`, 'err');
+        return;
+      }
       this.st.status = 3;
       this.st.ip = this.$static || lanIp(R.mac);
-      R.io.net('wifi', `WiFi đã kết nối (AP ảo "${binToUtf8(ssid)}"), IP ${this.st.ip}`);
-      R.io.wifi(true);
-    }, 900 + Math.random() * 600);
+      R.io.net('wifi', `WiFi đã kết nối (AP ảo "${name}"), IP ${this.st.ip}`);
+      this.$badge();
+    }, ok ? 900 + Math.random() * 600 : 2500);
+    const id = this.$joinTimer;
     R.cleanups.push(() => clearTimeout(id));
-    void pass;
     return this.st.status;
   }
   status() { return this.st.status; }
   isConnected() { return this.st.status === 3; }
-  disconnect() { this.st.status = 6; this.R.io.net('wifi', 'WiFi ngắt kết nối'); this.R.io.wifi(false); return true; }
+  disconnect() {
+    clearTimeout(this.$joinTimer);
+    if (this.st.status === 3 || this.st.status === 6) { this.st.status = 6; this.R.io.net('wifi', 'WiFi ngắt kết nối'); this.$badge(); }
+    return true;
+  }
   reconnect() { return this.begin(); }
   setAutoReconnect() { return true; }
   setAutoConnect() { return true; }
@@ -175,15 +209,43 @@ export class WiFiClass {
   channel(i) { return i === undefined ? 6 : [6, 1, 11, 6][i] || 1; }
   async scanNetworks() {
     await this.R.delay(1500);
-    this.$scan = [['ESP32-IoT-GUEST', -42, 0], ['ESP32-Lab', -58, 3], ['IoT-Class', -67, 3], ['CafeWiFi', -80, 3]];
+    this.$scan = NETWORKS.map((n) => n.slice());
     return this.$scan.length;
   }
   scanDelete() { this.$scan = null; }
-  softAP(ssid) { this.R.io.net('wifi', `SoftAP "${binToUtf8(this.R.h.str(ssid))}" khởi tạo (giả lập)`); return true; }
-  softAPIP() { return new IPAddress(this.R, '192.168.4.1'); }
-  softAPConfig() { return true; }
+  // access point: the browser plays the phone/laptop joining it and opens the board's WebServer at
+  // /__dev/<softAPIP>/ (sw.js); other boards cannot join it
+  softAP(ssid, pass) {
+    const R = this.R;
+    const name = binToUtf8(R.h.str(ssid));
+    const pw = pass == null ? '' : binToUtf8(R.h.str(pass));
+    if (!name || name.length > 32) { R.io.net('wifi', '✗ softAP: SSID phải dài 1–32 ký tự', 'err'); return false; }
+    if (pw && (pw.length < 8 || pw.length > 63)) { R.io.net('wifi', '✗ softAP: mật khẩu phải dài 8–63 ký tự (hoặc rỗng để mở)', 'err'); return false; }
+    this.$mode |= 2;
+    this.st.ap = { ssid: name, ip: this.$apIp || AP_DEFAULT_IP, last: 0 };
+    R.io.net('wifi', `📡 Phát WiFi "${name}" (${pw ? 'mật khẩu "' + pw + '"' : 'mạng mở'}), IP ${this.st.ap.ip}`);
+    this.$badge();
+    return true;
+  }
+  softAPConfig(ip) {
+    const s = ip && ip.o ? ip.toString() : AP_DEFAULT_IP;
+    this.$apIp = /^0\./.test(s) ? AP_DEFAULT_IP : s;
+    if (this.st.ap) this.st.ap.ip = this.$apIp;
+    return true;
+  }
+  softAPdisconnect() {
+    if (this.st.ap) { this.st.ap = null; this.R.io.net('wifi', 'Tắt phát WiFi (softAP)'); this.$badge(); }
+    this.$mode &= ~2;
+    return true;
+  }
+  softAPIP() { return new IPAddress(this.R, this.st.ap ? this.st.ap.ip : '0.0.0.0'); }
+  softAPSSID() { return this.st.ap ? utf8ToBin(this.st.ap.ssid) : ''; }
+  softAPmacAddress() { return this.R.mac.replace(/[0-9A-F]{2}$/, (h) => ((parseInt(h, 16) + 1) & 255).toString(16).toUpperCase().padStart(2, '0')); }
+  // the browser counts as a station while it has made a request in the last minute
+  softAPgetStationNum() { return this.st.ap && this.st.ap.last && Date.now() - this.st.ap.last < 60000 ? 1 : 0; }
+  softAPBroadcastIP() { return new IPAddress(this.R, this.st.ap ? this.st.ap.ip.replace(/\d+$/, '255') : '0.0.0.0'); }
 }
-WiFiClass.meta = { ret: { status: 'int', isConnected: 'bool', localIP: 'class:IPAddress', gatewayIP: 'class:IPAddress', subnetMask: 'class:IPAddress', dnsIP: 'class:IPAddress', softAPIP: 'class:IPAddress', macAddress: 'String', SSID: 'String', RSSI: 'int', scanNetworks: 'int', encryptionType: 'int', channel: 'int', getHostname: 'cstr', BSSIDstr: 'String', hostByName: 'int', broadcastIP: 'class:IPAddress', config: 'bool', begin: 'int', mode: 'bool', getMode: 'int', disconnect: 'bool' } };
+WiFiClass.meta = { ret: { status: 'int', isConnected: 'bool', localIP: 'class:IPAddress', gatewayIP: 'class:IPAddress', subnetMask: 'class:IPAddress', dnsIP: 'class:IPAddress', softAPIP: 'class:IPAddress', softAPBroadcastIP: 'class:IPAddress', softAPSSID: 'String', softAPmacAddress: 'String', softAPgetStationNum: 'int', softAP: 'bool', softAPConfig: 'bool', softAPdisconnect: 'bool', macAddress: 'String', SSID: 'String', RSSI: 'int', scanNetworks: 'int', encryptionType: 'int', channel: 'int', getHostname: 'cstr', BSSIDstr: 'String', hostByName: 'int', broadcastIP: 'class:IPAddress', config: 'bool', begin: 'int', mode: 'bool', getMode: 'int', disconnect: 'bool' } };
 
 export class WiFiClient {
   constructor(R) { this.R = R; }

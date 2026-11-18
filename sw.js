@@ -6,7 +6,7 @@
 const AIR = 'esp32-iot-sim-air';
 const TIMEOUT = 5000;
 const base = new URL(self.registration.scope).pathname;            // '/' (or the folder the simulator is served from)
-const DEV = new RegExp('^' + base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '__dev/(10\\.13\\.37\\.\\d{1,3})(?::(\\d+))?(/.*)?$');
+const DEV = new RegExp('^' + base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '__dev/((?:10\\.13\\.37|192\\.168\\.\\d{1,3})\\.\\d{1,3})(?::(\\d+))?(/.*)?$');
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));

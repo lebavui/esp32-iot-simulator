@@ -63,7 +63,7 @@ export class Runtime {
     this.ledc = { channels: new Map(), pins: new Map() };
     this.adcBits = 12;
     this.pwmBits = 8;
-    this.wifi = { status: 0, ssid: '', ip: '' };
+    this.wifi = { status: 0, ssid: '', ip: '', ap: null };
     this.time = { offset: 0, synced: false, syncAt: 0 };
     radioReset(this);
     this.warned = new Set();

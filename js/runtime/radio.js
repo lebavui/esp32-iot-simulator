@@ -654,7 +654,10 @@ function httpListen(R) {
   airListen(R, 'http-resp', (m) => { const p = R.httpPending && R.httpPending.get(m.id); if (p) p(m); });
 }
 function httpDispatch(R, m) {
-  if (R.wifi.status !== 3 || m.dst !== R.wifi.ip) return;
+  // a board's own access point (softAP) is only joined by the browser (sw.js)
+  const ap = R.wifi.ap;
+  if (ap && m.dst === ap.ip && m.src === 'browser') ap.last = Date.now();
+  else if (R.wifi.status !== 3 || m.dst !== R.wifi.ip) return;
   const srv = R.webServers && R.webServers.get(m.port);
   if (srv) srv.$queue(m);
 }
@@ -720,12 +723,14 @@ export class WebServer {
     R.webServers.set(this.port, this);
     httpListen(R);
     this.on_ = true;
-    const announce = () => {
+    const announce = (ip = R.wifi.ip, ap = false) => {
       const base = typeof location !== 'undefined' ? new URL('__dev/', location.href).href : '/__dev/';
-      R.io.net('http', `WebServer chạy ở http://${R.wifi.ip}${this.port === 80 ? '' : ':' + this.port}/ — mở ${base}${R.wifi.ip}${this.port === 80 ? '' : ':' + this.port}/ trong tab mới để truy cập`);
+      const hp = ip + (this.port === 80 ? '' : ':' + this.port);
+      R.io.net('http', `WebServer chạy ở http://${hp}/${ap ? ` (WiFi "${R.wifi.ap.ssid}" do board phát)` : ''} — mở ${base}${hp}/ trong tab mới để truy cập`);
     };
+    if (R.wifi.ap) announce(R.wifi.ap.ip, true);
     if (R.wifi.status === 3) announce();
-    else {
+    else if (!R.wifi.ap) {
       R.io.net('http', `WebServer (cổng ${this.port}) chờ WiFi kết nối...`);
       const id = setInterval(() => { if (R.wifi.status === 3) { clearInterval(id); announce(); } }, 200);
       R.cleanups.push(() => clearInterval(id));

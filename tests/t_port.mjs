@@ -115,13 +115,13 @@ for (const board of ['board-xiao-esp32-c3', 'board-xiao-esp32-c6', 'esp32-iot-es
 {
   const p = portProject(ex('xiao-c6-boot'), 'esp32-iot-esp32-devkit-v1');
   const btn = p.diagram.parts.find((q) => q.type === 'esp32-iot-pushbutton');
-  check('xiao-c6-boot → DevKit: BOOT replaced by a push button', !!btn);
+  check('xiao-c6-boot → DevKit: BOOT is the DevKit\'s BOOT button (GPIO0)', !btn && /#define BOOT_PIN 0\b/.test(p.code), p.code.split('\n').find((l) => /BOOT_PIN/.test(l)));
   const r = await run(p, 'esp32-iot-esp32-devkit-v1', 400, (parts, sim, t) => {
-    const b = parts.find((q) => q.type === 'esp32-iot-pushbutton');
+    const b = parts.find((q) => q.type === 'esp32-iot-esp32-devkit-v1');
     if (t > 200 && !b.pressed) { b.pressed = true; sim.invalidate(); }
     return sim.V(parts.find((q) => q.id === 'led1'), 'A') > 1 ? 'on' : 'off';
   });
-  check('xiao-c6-boot → DevKit: button lights the LED', r.seen[0] === 'off' && r.seen.at(-1) === 'on' && /BOOT: nhấn/.test(r.out));
+  check('xiao-c6-boot → DevKit: pressing BOOT lights the LED', r.seen[0] === 'off' && r.seen.at(-1) === 'on' && /BOOT: nhấn/.test(r.out));
 }
 {
   const p = portProject(ex('xiao-c3-pot'), 'board-xiao-esp32-c6');

@@ -27,7 +27,7 @@ và chỉ hoạt động với API cho phép CORS.
 lambda, range-for, `switch`, biến `static`. Lỗi biên dịch được báo theo dòng/cột kiểu GCC
 (`'x' was not declared in this scope`, `expected ';' …`).
 
-**Board**: ESP32 DevKit V1 (30 chân, LED onboard GPIO2), Seeed XIAO ESP32-C3 (nút BOOT D9/GPIO9), Seeed XIAO ESP32-C6
+**Board**: ESP32 DevKit V1 (30 chân, LED onboard GPIO2, nút BOOT GPIO0), Seeed XIAO ESP32-C3 (nút BOOT D9/GPIO9), Seeed XIAO ESP32-C6
 (LED onboard GPIO15, nút BOOT GPIO9). Mỗi board có hằng số chân (`A0`, `D0`…, `SDA`/`SCL`, `LED_BUILTIN`)
 theo `pins_arduino.h` của arduino-esp32 3.3, macro `CONFIG_IDF_TARGET_ESP32C3`/`…C6`, và kiểm tra theo chip (chân flash,
 ADC1/ADC2, chân chỉ-vào của ESP32, ADC2 của ESP32-C3 không dùng được, ESP32-C6 chỉ có ADC1 GPIO0–6). Board chọn ở ô riêng trên thanh công cụ; đổi board
@@ -53,7 +53,10 @@ FreeRTOS (`xTaskCreate`, `vTaskDelay`, hàng đợi `xQueue…`, semaphore/mutex
 `LoRa.h` (Sandeep Mistry), `esp_now.h`, `WiFiUdp.h`, `coap-simple.h` (CoAP simple library).
 
 **Mạng**:
-- `WiFi.begin(...)` kết nối vào một AP ảo (mọi SSID), sau đó ESP32 ảo truy cập Internet thật.
+- `WiFi.begin(...)` kết nối vào một AP ảo (mọi SSID), sau đó ESP32 ảo truy cập Internet thật. `WiFi.scanNetworks()` thấy
+  4 mạng ảo; các mạng có khóa (`ESP32-Lab`, `IoT-Class`, `CafeWiFi`) chỉ nhận mật khẩu `12345678` (sai → `WL_CONNECT_FAILED`).
+- **Chế độ AP** (`WiFi.softAP`): board phát WiFi (mặc định IP `192.168.4.1`); trình duyệt đóng vai điện thoại kết nối vào
+  AP và mở web server của board tại `http://<trình giả lập>/__dev/192.168.4.1/` (ví dụ "WiFi Manager").
 - MQTT: trình duyệt không mở được TCP, nên `client.setServer("broker.hivemq.com", 1883)` được tự động nối qua
   WebSocket (`wss://broker.hivemq.com:8884/mqtt`). Bảng ánh xạ broker sửa trong ⚙ Cài đặt.
 - Tab **MQTT Client** có sẵn để subscribe/publish và điều khiển thiết bị ảo; tab **Nhật ký mạng** ghi mọi sự kiện WiFi/HTTP/MQTT/LoRa/ESP-NOW/CoAP.

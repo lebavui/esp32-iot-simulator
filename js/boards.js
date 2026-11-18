@@ -57,7 +57,7 @@ export const BOARDS = {
   'esp32-iot-esp32-devkit-v1': {
     label: 'ESP32 DevKit V1', chip: 'esp32', left: ESP32_LEFT, right: ESP32_RIGHT, gpio: ESP32_GPIO,
     power: { 'GND.1': 0, 'GND.2': 0, '3V3': 3.3, VIN: 5 },
-    led: { gpio: 2, activeLow: false }, buzzer: 4, consts: null, // the defaults in runtime/meta.js are the DevKit's
+    led: { gpio: 2, activeLow: false }, boot: { gpio: 0 }, buzzer: 4, consts: null, // the defaults in runtime/meta.js are the DevKit's
     // header GPIOs preferred when a project is moved to this board (port.js): general I/O, then ADC inputs
     prefer: { digital: [4, 5, 13, 14, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33, 15, 12], analog: [34, 35, 32, 33, 36, 39] },
     defines: ['ARDUINO_ESP32_DEV', 'CONFIG_IDF_TARGET_ESP32'],

@@ -23,9 +23,10 @@ function boot(ex, { code, attrs = {}, drop = [] } = {}) {
   sim.setDiagram(parts, ex.diagram.connections.filter((c) => !drop.includes(c[1])).map(([from, to]) => ({ from, to })));
   let out = '';
   const logs = [];
+  let restarts = 0;
   const R = new Runtime({
     sim, settings: {},
-    io: { serialWrite: (_p, s, b) => { if (!b) out += s; }, log: (l, m) => logs.push(`${l}: ${m}`), net: (k, m) => logs.push(`${k}: ${m}`), wifi() {}, restart() {}, onStopped() {} },
+    io: { serialWrite: (_p, s, b) => { if (!b) out += s; }, log: (l, m) => logs.push(`${l}: ${m}`), net: (k, m) => logs.push(`${k}: ${m}`), wifi() {}, restart() { restarts++; }, onStopped() {} },
   });
   const done = R.start(compile(code || ex.code).code);
   // the browser re-solves the circuit every frame (pin-change interrupts, relay contacts follow inputs)
@@ -34,6 +35,7 @@ function boot(ex, { code, attrs = {}, drop = [] } = {}) {
   const part = (id) => parts.find((p) => p.id === id);
   return {
     R, sim, part, logs, done,
+    get restarts() { return restarts; },
     get out() { return binToUtf8(out); },
     set(id, key, v) { part(id).attrs[key] = v; sim.invalidate(); },
     serial(s) { R.serialIn.push(...Buffer.from(s)); },
@@ -257,6 +259,61 @@ void loop() { delay(100); }` });
   check('WebServer: page has the saved name filled in', await until(() => cli.out.includes('<title>Phong ngu</title>'), 4000));
   await cli.stop();
   await srv.stop();
+}
+
+// ---------------------------------------------------------------- WiFi manager: softAP + config page, restart, BOOT reset
+{
+  // the browser joined to the board's access point: an 'http-req' from 'browser' over the air, like sw.js
+  const browser = new BroadcastChannel('esp32-iot-sim-air');
+  const pending = new Map();
+  browser.onmessage = (e) => { const m = e.data; if (m && m.kind === 'http-resp' && pending.has(m.id)) pending.get(m.id)(m); };
+  let seq = 0;
+  const req = (method, path, body = '') => new Promise((resolve) => {
+    const id = 'test-' + ++seq;
+    const timer = setTimeout(() => { pending.delete(id); resolve(null); }, 3000);
+    pending.set(id, (m) => { clearTimeout(timer); pending.delete(id); resolve({ ...m, text: binToUtf8(m.body || '') }); });
+    browser.postMessage({ kind: 'http-req', id, src: 'browser', dst: '192.168.4.1', port: 80, method, path, query: '',
+      headers: body ? { 'content-type': 'application/x-www-form-urlencoded' } : {}, body });
+  });
+  const oledText = (t) => t.part('oled1').state && t.part('oled1').state.fb.some((v) => v);
+
+  let t = boot('wifi-manager');
+  check('WiFi manager: no config → softAP + server', await until(() => t.out.includes('Mo http://192.168.4.1'), 4000), t.out);
+  check('WiFi manager: log drawn on the OLED', oledText(t));
+  let r = await req('GET', '/');
+  check('WiFi manager: config page lists the scanned networks', r && r.status === 200 && r.text.includes('<option value="ESP32-Lab">ESP32-Lab (-58 dBm, có khóa)</option>'), r && r.text.slice(0, 80));
+  check('WiFi manager: browser counts as a station', await until(() => t.out.includes('Co thiet bi ket noi')), t.out);
+  r = await req('GET', '/generate_204');
+  check('WiFi manager: unknown path → 302 to /', r && r.status === 302 && r.headers.location === '/');
+  r = await req('POST', '/save', 'ssid=ESP32-Lab&pass=1234');
+  check('WiFi manager: short password refused', r && r.status === 400);
+  r = await req('POST', '/save', 'ssid=ESP32-Lab&pass=wrongpass');
+  check('WiFi manager: save → page + restart', r && r.status === 200 && r.text.includes('Đã lưu cấu hình') && await until(() => t.restarts === 1, 4000), t.out);
+  await t.stop();
+
+  t = boot('wifi-manager');
+  check('WiFi manager: wrong password → back to AP', await until(() => /Sai mat khau![^]*-> Mo che do AP[^]*Mo http:\/\/192\.168\.4\.1/.test(t.out), 8000), t.out);
+  r = await req('GET', '/');
+  check('WiFi manager: page warns about the failed network', r && r.text.includes('Không kết nối được tới <b>ESP32-Lab</b>') && r.text.includes('value="ESP32-Lab" maxlength'));
+  r = await req('POST', '/save', 'ssid=ESP32-Lab&pass=12345678');
+  check('WiFi manager: save the right password → restart', r && r.status === 200 && await until(() => t.restarts === 1, 4000));
+  await t.stop();
+
+  t = boot('wifi-manager');
+  check('WiFi manager: connects to the saved network', await until(() => /Ket noi: ESP32-Lab[^]*Da ket noi WiFi![^]*IP 10\.13\.37\.\d+/.test(t.out), 5000), t.out);
+  check('WiFi manager: AP off in station mode', t.R.wifi.ap === null && (await req('GET', '/')) === null);
+  t.part('esp').pressed = true; t.sim.invalidate();
+  await wait(2500);
+  t.part('esp').pressed = false; t.sim.invalidate();
+  check('WiFi manager: BOOT released early → no reset', await until(() => t.out.includes('Nha BOOT: huy reset')) && t.restarts === 0, t.out);
+  t.part('esp').pressed = true; t.sim.invalidate();
+  check('WiFi manager: BOOT held 5 s → clear config + restart', await until(() => t.restarts === 1, 8000) && /BOOT: 4s\.\.\.[^]*Xoa cau hinh WiFi!/.test(t.out), t.out);
+  await t.stop();
+
+  t = boot('wifi-manager');
+  check('WiFi manager: after the reset it opens the AP again', await until(() => t.out.includes('Chua cau hinh WiFi') && t.out.includes('Phat WiFi: ESP32-'), 4000), t.out);
+  await t.stop();
+  browser.close();
 }
 
 // ---------------------------------------------------------------- LoRa

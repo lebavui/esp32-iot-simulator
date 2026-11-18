@@ -30,7 +30,7 @@ export const HELP_HTML = `
 <table>
 <tr><td>Arduino core</td><td>pinMode, digitalWrite/Read, analogRead (12 bit), analogWrite, ledcAttach/ledcWrite (v3) & ledcSetup/ledcAttachPin (v2), tone/noTone, pulseIn, millis/micros/delay, attachInterrupt, map/constrain/random, toán học, String, sprintf/snprintf, dtostrf, strcpy/strcmp…</td></tr>
 <tr><td>Serial</td><td>begin, print/println (DEC/HEX/BIN, số chữ số thập phân), printf, write, available, read, readString, readStringUntil, parseInt, parseFloat</td></tr>
-<tr><td>WiFi.h</td><td>WiFi.begin (mọi SSID đều kết nối vào AP ảo), status, localIP, RSSI, macAddress, scanNetworks, disconnect</td></tr>
+<tr><td>WiFi.h</td><td>WiFi.begin (mọi SSID đều kết nối vào AP ảo; mạng có khóa trong danh sách quét dùng mật khẩu 12345678), status, localIP, RSSI, macAddress, scanNetworks, disconnect, mode, softAP/softAPIP/softAPConfig/softAPdisconnect/softAPgetStationNum</td></tr>
 <tr><td>HTTPClient.h</td><td>begin, addHeader, GET, POST, PUT, PATCH, sendRequest, getString, errorToString, setAuthorization, end</td></tr>
 <tr><td>PubSubClient.h</td><td>setServer, setCallback, connect (id, user, pass, will), publish, subscribe, unsubscribe, loop, connected, state</td></tr>
 <tr><td>ArduinoJson.h</td><td>JsonDocument / StaticJsonDocument / DynamicJsonDocument, doc["key"], as&lt;T&gt;(), is&lt;T&gt;(), | mặc định, createNestedObject/Array, add, serializeJson(Pretty), deserializeJson, duyệt range-for</td></tr>
@@ -45,7 +45,7 @@ export const HELP_HTML = `
   <li>HTTP được thực hiện bằng <code>fetch</code>. Khi chạy bằng <code>node server.js</code>, yêu cầu được chuyển qua proxy cục bộ nên không bị lỗi CORS và gọi được cả <code>http://</code>.</li>
   <li>Tab <b>Nhật ký mạng</b> ghi lại mọi sự kiện WiFi / HTTP / MQTT / LoRa / ESP-NOW / CoAP của thiết bị.</li>
   <li><b>Nhiều board</b>: mở trình giả lập ở nhiều tab (cùng địa chỉ) — mỗi tab là một board, các tab nghe thấy nhau qua LoRa, ESP-NOW và UDP/CoAP/HTTP trong mạng WiFi ảo 10.13.37.x (IP động .100–.249, đặt IP tĩnh bằng <code>WiFi.config</code>). Ví dụ: chạy "LoRa: node gửi" ở tab này và "LoRa: node nhận" ở tab khác.</li>
-  <li><b>Web server trên board</b> (<code>WebServer.h</code>): khi board chạy, tab Nhật ký mạng hiện link <code>…/__dev/10.13.37.x/</code> — mở trong tab mới để dùng trang web của board (form, nút bấm, <code>fetch</code>); board khác truy cập bằng <code>HTTPClient</code>.</li>
+  <li><b>Web server trên board</b> (<code>WebServer.h</code>): khi board chạy, tab Nhật ký mạng hiện link <code>…/__dev/10.13.37.x/</code> — mở trong tab mới để dùng trang web của board (form, nút bấm, <code>fetch</code>); board khác truy cập bằng <code>HTTPClient</code>. Board ở chế độ AP (<code>WiFi.softAP</code>) có trang ở <code>…/__dev/192.168.4.1/</code> (trình duyệt đóng vai thiết bị kết nối vào AP).</li>
   <li>UDP/CoAP ra Internet (vd. <code>coap.me</code>) và <code>WiFi.hostByName</code> cần chạy bằng <code>node server.js</code>.</li>
 </ul>
 <h3>Giới hạn</h3>
