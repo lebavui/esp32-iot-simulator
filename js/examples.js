@@ -2091,11 +2091,13 @@ void loop() {
   {
     id: 'coap-client', name: '22. CoAP ThingsBoard: gửi DHT11, điều khiển LED', category: 'Giao thức',
     code: `// CoAP với ThingsBoard Cloud (coap.thingsboard.cloud:5683): mỗi 5 giây
-//  - POST nhiệt độ, độ ẩm (DHT11, chân D2) lên /api/v1/TOKEN/telemetry
-//  - GET shared attribute "led-state" (/api/v1/TOKEN/attributes?sharedKeys=led-state) rồi bật/tắt LED.
-// Trên thingsboard.cloud: tạo device, copy Access token vào TOKEN, thêm Shared attribute "led-state" kiểu Boolean.
-// Trình duyệt không gửi được UDP: cần chạy "npm start", server sẽ chuyển tiếp gói CoAP.
-// Phản hồi đến hàm callback_response(): 2.01 = Created, 2.05 = Content, 4.01 = sai TOKEN.
+//  - POST nhiệt độ, độ ẩm (DHT11, chân D2) lên  api/v1/TOKEN/telemetry
+//  - GET shared attribute "led-state" từ        api/v1/TOKEN/attributes?sharedKeys=led-state
+//    rồi bật/tắt LED (chân D0).
+// Trên thingsboard.cloud: tạo device, copy Access token vào TOKEN,
+// thêm Shared attribute "led-state" kiểu Boolean (tab Attributes > Shared attributes).
+// Trình duyệt không gửi được UDP: nếu chạy giả lập, cần chạy "npm start" để chuyển tiếp gói CoAP.
+// Mã phản hồi in ra Serial: 2.01 = Created (POST OK), 2.05 = Content (GET OK), 4.01 = sai TOKEN.
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <coap-simple.h>
@@ -2105,6 +2107,8 @@ void loop() {
 const char* ssid = "ESP32-IoT-GUEST";
 const char* password = "";
 const char* TOKEN = "YOUR_ACCESS_TOKEN";   // Access token của device trên ThingsBoard
+const char* TB_HOST = "coap.thingsboard.cloud";
+const int TB_PORT = 5683;
 const int LED_PIN = D0;
 
 WiFiUDP udp;
@@ -2113,26 +2117,85 @@ DHT dht(D2, DHT11);
 IPAddress tbIP;
 String telemetryUrl, attributesUrl;
 unsigned long lastSend = 0;
+uint8_t getToken[2];   // token của lệnh GET mới nhất; server gửi lại đúng token này trong phản hồi
 
+// Xử lý mọi phản hồi từ server (ACK của POST/GET, và kết quả GET gửi riêng).
 void callback_response(CoapPacket &packet, IPAddress ip, int port) {
   char p[packet.payloadlen + 1];
   memcpy(p, packet.payload, packet.payloadlen);
-  p[packet.payloadlen] = NULL;
-  Serial.printf("[CoAP] Phản hồi %d.%02d (mid %d): %s\\n", packet.code >> 5, packet.code & 0x1F, packet.messageid, p);
-  // Không so message id: server có thể trả ACK rỗng trước, rồi gửi kết quả trong gói CON mới (mid khác).
-  // Nhận diện phản hồi của GET attribute bằng nội dung: {"shared":{"led-state":true}}
+  p[packet.payloadlen] = 0;
+  Serial.printf("[CoAP] Phản hồi %d.%02d (mid %u): %s\\n",
+                packet.code >> 5, packet.code & 0x1F, packet.messageid, p);
+
+  // Chỉ xử lý kết quả GET (2.05) của lệnh GET mới nhất (so token).
+  // Phản hồi cũ / bị gửi lại mang giá trị cũ -> bỏ qua, tránh LED nhảy qua lại.
   if (packet.code != COAP_CONTENT) return;
+  if (packet.tokenlen != sizeof(getToken) || memcmp(packet.token, getToken, sizeof(getToken)) != 0) {
+    Serial.println("  -> phản hồi cũ, bỏ qua");
+    return;
+  }
+
+  // Nội dung dạng {"shared":{"led-state":true}}
   JsonDocument doc;
-  if (deserializeJson(doc, p) || !doc.containsKey("shared")) return;
-  bool led = doc["shared"]["led-state"];
-  digitalWrite(LED_PIN, led ? HIGH : LOW);
-  Serial.println(led ? "LED: BẬT" : "LED: TẮT");
+  if (deserializeJson(doc, p)) return;
+  JsonVariant led = doc["shared"]["led-state"];
+  if (!led.is<bool>()) {
+    Serial.println("  -> chưa có shared attribute \\"led-state\\" trên server");
+    return;
+  }
+  digitalWrite(LED_PIN, led.as<bool>() ? HIGH : LOW);
+  Serial.println(led.as<bool>() ? "LED: BẬT" : "LED: TẮT");
+}
+
+// ThingsBoard có thể trả kết quả GET theo 2 bước: ACK rỗng trước, rồi gửi kết quả trong gói CON riêng
+// (separate response). Thư viện chỉ gọi callback_response() cho gói ACK; gói CON riêng không có Uri-Path
+// nên thư viện coi là request tới URL "" -> handler này bắt gói đó.
+void callback_separate(CoapPacket &packet, IPAddress ip, int port) {
+  if ((packet.code >> 5) < 2) return;   // 0.xx là request thật, không phải phản hồi
+  if (packet.type == COAP_CON) {
+    // Gửi ACK rỗng đúng chuẩn (chỉ 4 byte header). Không dùng coap.sendResponse() vì nó luôn thêm
+    // option Content-Format -> server coi là gói sai và gửi lại kết quả cũ nhiều lần.
+    uint8_t ack[4] = {0x60, 0x00, (uint8_t)(packet.messageid >> 8), (uint8_t)(packet.messageid & 0xFF)};
+    udp.beginPacket(ip, port);
+    udp.write(ack, sizeof(ack));
+    udp.endPacket();
+  }
+  callback_response(packet, ip, port);
+}
+
+// POST nhiệt độ, độ ẩm lên telemetry.
+void postTelemetry() {
+  float t = dht.readTemperature();
+  float h = dht.readHumidity();
+  if (isnan(t) || isnan(h)) {          // gửi NaN sẽ thành null -> ThingsBoard từ chối
+    Serial.println("Đọc DHT lỗi, bỏ qua lần gửi này");
+    return;
+  }
+  JsonDocument doc;
+  doc["temperature"] = t;
+  doc["humidity"] = h;
+  char buf[64];
+  size_t len = serializeJson(doc, buf);
+  coap.send(tbIP, TB_PORT, telemetryUrl.c_str(), COAP_CON, COAP_POST, NULL, 0,
+            (uint8_t*)buf, len, COAP_APPLICATION_JSON);
+  Serial.printf("POST telemetry: %s\\n", buf);
+}
+
+// GET trạng thái LED (shared attribute "led-state"); mỗi lệnh GET dùng một token mới.
+void getLedState() {
+  uint16_t r = esp_random();
+  getToken[0] = r >> 8;
+  getToken[1] = r & 0xFF;
+  coap.send(tbIP, TB_PORT, attributesUrl.c_str(), COAP_CON, COAP_GET,
+            getToken, sizeof(getToken), NULL, 0);
+  Serial.println("GET led-state");
 }
 
 void setup() {
   Serial.begin(115200);
   pinMode(LED_PIN, OUTPUT);
   dht.begin();
+
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(250);
@@ -2141,34 +2204,28 @@ void setup() {
   Serial.print("\\nWiFi OK, IP: ");
   Serial.println(WiFi.localIP());
 
-  while (!WiFi.hostByName("coap.thingsboard.cloud", tbIP)) {
-    Serial.println("Không phân giải được coap.thingsboard.cloud, thử lại...");
+  while (!WiFi.hostByName(TB_HOST, tbIP)) {
+    Serial.printf("Không phân giải được %s, thử lại...\\n", TB_HOST);
     delay(2000);
   }
-  Serial.print("coap.thingsboard.cloud = ");
-  Serial.println(tbIP);
-  telemetryUrl = String("api/v1/") + TOKEN + "/telemetry";
-  attributesUrl = String("api/v1/") + TOKEN + "/attributes";
+  Serial.printf("%s = %s\\n", TB_HOST, tbIP.toString().c_str());
 
-  coap.response(callback_response);
+  // Thư viện tự tách phần sau '?' thành option Uri-Query.
+  telemetryUrl = String("api/v1/") + TOKEN + "/telemetry";
+  attributesUrl = String("api/v1/") + TOKEN + "/attributes?sharedKeys=led-state";
+
+  coap.response(callback_response);     // phản hồi dạng ACK (piggybacked)
+  coap.server(callback_separate, "");   // phản hồi gửi riêng (separate response)
   coap.start();
 }
 
 void loop() {
   if (millis() - lastSend > 5000) {
     lastSend = millis();
-    JsonDocument doc;
-    doc["temperature"] = dht.readTemperature();
-    doc["humidity"] = dht.readHumidity();
-    char buf[128];
-    serializeJson(doc, buf);
-    coap.send(tbIP, 5683, telemetryUrl.c_str(), COAP_CON, COAP_POST, NULL, 0,
-              (uint8_t*)buf, strlen(buf), COAP_APPLICATION_JSON, NULL);
-    Serial.printf("POST telemetry: %s\\n", buf);
-    coap.send(tbIP, 5683, attributesUrl.c_str(), COAP_CON, COAP_GET, NULL, 0,
-              NULL, 0, COAP_NONE, "sharedKeys=led-state");
+    postTelemetry();
+    getLedState();
   }
-  coap.loop();                     // nhận phản hồi
+  coap.loop();   // nhận phản hồi
   delay(10);
 }
 `,
