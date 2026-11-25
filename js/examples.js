@@ -72,13 +72,23 @@ const LED_D5 = {
   ],
   conns: [C('esp:D5', 'r1:1', 'green'), C('r1:2', 'led1:A', 'green'), C('led1:C', 'esp:GND.2', 'black')],
 };
-// second LED (green) + 220 Ω on GPIO5, beside LED_D4
-const LED2_D5 = {
+// two LEDs, each straight across from its GPIO row: green (D5, y144) right of red (D4, y180, LED lowered
+// so its body clears the D5 wire); both cathodes share one GND wire along y240
+const TWO_LEDS_D4_D5 = {
   parts: [
+    { type: 'esp32-iot-resistor', id: 'r1', top: 174, left: 140, attrs: { value: '220' } },
+    { type: 'esp32-iot-led', id: 'led1', top: 152, left: 230, attrs: { color: 'red' } },
     { type: 'esp32-iot-resistor', id: 'r2', top: 138, left: 140, attrs: { value: '220' } },
-    { type: 'esp32-iot-led', id: 'led2', top: 40, left: 290, attrs: { color: 'green' } },
+    { type: 'esp32-iot-led', id: 'led2', top: 80, left: 290, attrs: { color: 'green' } },
   ],
-  conns: [C('esp:D5', 'r2:1', 'green'), C('r2:2', 'led2:A', 'green'), C('led2:C', 'esp:GND.2', 'black')],
+  conns: [
+    C('esp:D4', 'r1:1', 'green', []),
+    C('r1:2', 'led1:A', 'green', [[220, 180], [220, 216]]),
+    C('led1:C', 'esp:GND.2', 'black', [[250, 240], [132, 240], [132, 216]]),
+    C('esp:D5', 'r2:1', 'green', []),
+    C('r2:2', 'led2:A', 'green', []),
+    C('led2:C', 'led1:C', 'black', [[310, 240], [250, 240]]),
+  ],
 };
 const BUTTON_D15 = {
   parts: [{ type: 'esp32-iot-pushbutton', id: 'btn1', top: 220, left: 160, attrs: { color: 'green' } }],
@@ -815,42 +825,40 @@ void loop() {
   {
     id: 'freertos', name: 'FreeRTOS: 2 task nháy 2 LED', category: 'Nâng cao',
     code: `// Hai task FreeRTOS chạy song song, mỗi task nháy một LED với chu kỳ riêng:
-//  - LED đỏ (GPIO4): đổi trạng thái mỗi 200 ms
-//  - LED xanh (GPIO5): đổi trạng thái mỗi 1000 ms
+//  - taskLedRed:   LED đỏ (GPIO4) đổi trạng thái mỗi 200 ms
+//  - taskLedGreen: LED xanh (GPIO5) đổi trạng thái mỗi 1000 ms
 // Nếu viết bằng delay() trong loop() thì hai chu kỳ phải chờ lẫn nhau; với task, vTaskDelay() chỉ dừng task đó.
-const int LED_RED = 4;
-const int LED_GREEN = 5;
+#define LED_RED   4
+#define LED_GREEN 5
 
-struct BlinkParam {
-  int pin;
-  int periodMs;
-};
+void taskLedRed(void *pv) {
+  pinMode(LED_RED, OUTPUT);
+  while (true) {
+    digitalWrite(LED_RED, !digitalRead(LED_RED));
+    vTaskDelay(pdMS_TO_TICKS(200));
+  }
+}
 
-BlinkParam fast = {LED_RED, 200};
-BlinkParam slow = {LED_GREEN, 1000};
-
-// một hàm task dùng cho cả hai LED, tham số truyền qua pvParameters
-void taskBlink(void *pv) {
-  BlinkParam *p = (BlinkParam *)pv;
-  pinMode(p->pin, OUTPUT);
-  for (;;) {
-    digitalWrite(p->pin, !digitalRead(p->pin));
-    if (p->periodMs >= 1000) Serial.printf("[core %d] LED GPIO%d đổi trạng thái, millis=%lu\\n", xPortGetCoreID(), p->pin, millis());
-    vTaskDelay(pdMS_TO_TICKS(p->periodMs));
+void taskLedGreen(void *pv) {
+  pinMode(LED_GREEN, OUTPUT);
+  while (true) {
+    digitalWrite(LED_GREEN, !digitalRead(LED_GREEN));
+    Serial.printf("LED xanh đổi trạng thái, millis=%lu\\n", millis());
+    vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
 
 void setup() {
   Serial.begin(115200);
-  xTaskCreatePinnedToCore(taskBlink, "blinkFast", 2048, &fast, 1, NULL, 0);
-  xTaskCreatePinnedToCore(taskBlink, "blinkSlow", 2048, &slow, 1, NULL, 1);
+  xTaskCreate(taskLedRed, "LedRed", 2048, NULL, 1, NULL);
+  xTaskCreate(taskLedGreen, "LedGreen", 2048, NULL, 1, NULL);
 }
 
 void loop() {
   vTaskDelete(NULL);   // không dùng loop()
 }
 `,
-    diagram: compose(LED_D4, LED2_D5),
+    diagram: compose(TWO_LEDS_D4_D5),
   },
   {
     id: 'ntp-oled', name: '16. Đồng hồ NTP trên OLED', category: 'IoT',
@@ -3287,79 +3295,75 @@ void loop() {
     diagram: diagram(OLED_PARTS, OLED_CONNS),
   },
   {
-    id: 'freertos-queue', name: 'FreeRTOS: gửi & nhận dữ liệu đồng thời (queue, mutex)', category: 'FreeRTOS',
-    code: `// Ba task FreeRTOS chạy đồng thời:
-//  - taskSensor : đọc DHT22 mỗi 2 giây, đẩy kết quả vào hàng đợi (queue) — không đụng tới mạng
-//  - taskSend   : chờ dữ liệu trong hàng đợi, gửi lên MQTT (publish)
-//  - taskReceive: liên tục nhận lệnh MQTT (client.loop()) để bật/tắt LED ngay lập tức
-// PubSubClient không an toàn khi 2 task dùng cùng lúc -> bảo vệ bằng mutex (xSemaphoreTake/Give).
-// Thử: ở tab "MQTT", subscribe "esp32sim/rtos/#" để xem dữ liệu, publish "on"/"off" vào "esp32sim/rtos/led".
-// Đổi TOPIC_BASE thành tên riêng để không trùng với người khác!
+    id: 'freertos-queue', name: 'FreeRTOS: gửi dữ liệu & điều khiển LED qua ThingsBoard (HTTP)', category: 'FreeRTOS',
+    code: `// Hai task FreeRTOS chạy đồng thời, cùng làm việc với ThingsBoard Cloud qua HTTP:
+//  - taskSendData: mỗi 5 giây đọc DHT22 và gửi nhiệt độ, độ ẩm lên bằng HTTP POST (telemetry)
+//  - taskGetLed  : mỗi 1 giây đọc trạng thái LED (shared attribute "led-state") bằng HTTP GET và bật/tắt LED
+// Mỗi task chờ bằng vTaskDelay() nên chu kỳ 5 s và 1 s không chờ lẫn nhau.
+// Trên thingsboard.cloud: tạo device, copy Access token vào TOKEN, thêm Shared attribute "led-state" kiểu Boolean;
+// xem dữ liệu ở tab "Latest telemetry".
 #include <WiFi.h>
-#include <PubSubClient.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
 #include <DHT.h>
 
-#define TOPIC_BASE "esp32sim/rtos"
+const char* ssid = "ESP32-IoT-GUEST";
+const char* password = "";
+const char* TOKEN = "YOUR_ACCESS_TOKEN";   // Access token của device trên ThingsBoard
 const int LED_PIN = 4;
 
-struct Reading {
-  float temp;
-  float hum;
-  unsigned long at;
-};
-
-WiFiClient espClient;
-PubSubClient client(espClient);
 DHT dht(15, DHT22);
-QueueHandle_t readings;
-SemaphoreHandle_t mqttMutex;
 
-void callback(char* topic, byte* payload, unsigned int length) {
-  String msg = "";
-  for (unsigned int i = 0; i < length; i++) msg += (char)payload[i];
-  Serial.printf("[nhận] %s = %s\\n", topic, msg.c_str());
-  if (msg == "on" || msg == "1") digitalWrite(LED_PIN, HIGH);
-  if (msg == "off" || msg == "0") digitalWrite(LED_PIN, LOW);
-}
+// Task 1: đọc cảm biến và POST lên ThingsBoard
+void taskSendData(void* pv) {
+  while (true) {
+    JsonDocument doc;
+    doc["temperature"] = dht.readTemperature();
+    doc["humidity"] = dht.readHumidity();
+    String body;
+    serializeJson(doc, body);   // vd: {"temperature":24.5,"humidity":40}
 
-void taskSensor(void* pv) {
-  for (;;) {
-    Reading r;
-    r.temp = dht.readTemperature();
-    r.hum = dht.readHumidity();
-    r.at = millis();
-    if (xQueueSend(readings, &r, pdMS_TO_TICKS(100)) != pdTRUE) Serial.println("[cảm biến] hàng đợi đầy, bỏ mẫu");
-    vTaskDelay(pdMS_TO_TICKS(2000));
-  }
-}
-
-void taskSend(void* pv) {
-  Reading r;
-  char buf[96];
-  for (;;) {
-    if (xQueueReceive(readings, &r, portMAX_DELAY) == pdTRUE) {   // ngủ cho tới khi có dữ liệu
-      snprintf(buf, sizeof(buf), "{\\"temp\\":%.1f,\\"hum\\":%.1f,\\"t\\":%lu}", r.temp, r.hum, r.at / 1000);
-      xSemaphoreTake(mqttMutex, portMAX_DELAY);
-      bool ok = client.connected() && client.publish(TOPIC_BASE "/sensor", buf);
-      xSemaphoreGive(mqttMutex);
-      Serial.printf("[gửi] %s %s (còn %d mẫu chờ)\\n", buf, ok ? "OK" : "LỖI", uxQueueMessagesWaiting(readings));
+    HTTPClient http;
+    http.begin(String("https://thingsboard.cloud/api/v1/") + TOKEN + "/telemetry");
+    http.addHeader("Content-Type", "application/json");
+    int code = http.POST(body);
+    if (code == HTTP_CODE_OK) {
+      Serial.println("[POST] Đã gửi: " + body);
+    } else if (code > 0) {
+      Serial.printf("[POST] HTTP %d — kiểm tra lại TOKEN\\n", code);   // 401: sai Access token
+    } else {
+      Serial.println("[POST] Lỗi: " + http.errorToString(code));    // không kết nối được
     }
+    http.end();
+    vTaskDelay(pdMS_TO_TICKS(5000));
   }
 }
 
-void taskReceive(void* pv) {
-  for (;;) {
-    xSemaphoreTake(mqttMutex, portMAX_DELAY);
-    if (!client.connected()) {
-      String id = "esp32-rtos-" + String(random(0xffff), HEX);
-      if (client.connect(id.c_str())) {
-        client.subscribe(TOPIC_BASE "/led");
-        Serial.println("[nhận] MQTT đã kết nối, đã subscribe " TOPIC_BASE "/led");
+// Task 2: GET trạng thái LED từ ThingsBoard và cập nhật LED
+void taskGetLed(void* pv) {
+  while (true) {
+    HTTPClient http;
+    http.begin(String("https://thingsboard.cloud/api/v1/") + TOKEN + "/attributes?sharedKeys=led-state");
+    int code = http.GET();
+    if (code == HTTP_CODE_OK) {
+      String payload = http.getString();   // vd: {"shared":{"led-state":true}}
+      JsonDocument doc;
+      if (deserializeJson(doc, payload) == DeserializationError::Ok) {
+        bool led = doc["shared"]["led-state"];
+        if (led != digitalRead(LED_PIN)) {
+          digitalWrite(LED_PIN, led ? HIGH : LOW);
+          Serial.println(led ? "[GET] LED: BẬT" : "[GET] LED: TẮT");
+        }
+      } else {
+        Serial.println("[GET] Lỗi JSON: " + payload);
       }
+    } else if (code > 0) {
+      Serial.printf("[GET] HTTP %d — kiểm tra lại TOKEN\\n", code);
+    } else {
+      Serial.println("[GET] Lỗi: " + http.errorToString(code));
     }
-    client.loop();
-    xSemaphoreGive(mqttMutex);
-    vTaskDelay(pdMS_TO_TICKS(client.connected() ? 10 : 3000));
+    http.end();
+    vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
 
@@ -3367,17 +3371,16 @@ void setup() {
   Serial.begin(115200);
   pinMode(LED_PIN, OUTPUT);
   dht.begin();
-  WiFi.begin("ESP32-IoT-GUEST", "");
-  while (WiFi.status() != WL_CONNECTED) { delay(250); Serial.print("."); }
-  Serial.println("\\nWiFi connected");
-  client.setServer("broker.hivemq.com", 1883);
-  client.setCallback(callback);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(250);
+    Serial.print(".");
+  }
+  Serial.print("\\nWiFi OK, IP: ");
+  Serial.println(WiFi.localIP());
 
-  readings = xQueueCreate(5, sizeof(Reading));
-  mqttMutex = xSemaphoreCreateMutex();
-  xTaskCreatePinnedToCore(taskSensor, "sensor", 4096, NULL, 1, NULL, 1);
-  xTaskCreatePinnedToCore(taskSend, "send", 4096, NULL, 1, NULL, 1);
-  xTaskCreatePinnedToCore(taskReceive, "receive", 4096, NULL, 2, NULL, 0);
+  xTaskCreate(taskSendData, "sendData", 8192, NULL, 1, NULL);
+  xTaskCreate(taskGetLed, "getLed", 8192, NULL, 1, NULL);
 }
 
 void loop() {
@@ -3435,7 +3438,7 @@ const CATALOG = [
   ]],
   ['FreeRTOS', [
     ['freertos', 'Nhấp nháy 2 LED với chu kỳ khác nhau'],
-    ['freertos-queue', 'Gửi & nhận dữ liệu đồng thời (queue, mutex)'],
+    ['freertos-queue', 'ThingsBoard HTTP: task gửi cảm biến & task điều khiển LED'],
   ]],
   ['Khác', [
     ['espnow-sender', 'ESP-NOW: gửi struct (broadcast)'],
