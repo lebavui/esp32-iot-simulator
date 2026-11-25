@@ -39,7 +39,7 @@ export const CHIPS = {
 };
 
 // Constants that come from a board's pins_arduino.h; boards other than the DevKit replace all of them.
-const PIN_CONSTS = ['LED_BUILTIN', 'BUILTIN_LED', 'RGB_BUILTIN', 'SDA', 'SCL', 'TX', 'RX', 'MOSI', 'MISO', 'SCK', 'SS',
+const PIN_CONSTS = ['LED_BUILTIN', 'BUILTIN_LED', 'BOOT_PIN', 'RGB_BUILTIN', 'SDA', 'SCL', 'TX', 'RX', 'MOSI', 'MISO', 'SCK', 'SS',
   'DAC1', 'DAC2', ...range(0, 19).map((i) => 'A' + i), ...range(0, 14).map((i) => 'T' + i)];
 const seq = (prefix, gpios) => Object.fromEntries(gpios.map((g, i) => [prefix + i, g]));
 
@@ -67,7 +67,7 @@ export const BOARDS = {
     gpio: seq('D', XIAO_C3_D), power: { GND: 0, '3V3': 3.3, '5V': 5 },
     led: null, boot: { gpio: 9 }, buzzer: 5, // no user LED; BOOT button = GPIO9 (D9); buzzer on D3 (XIAO expansion board)
     prefer: { digital: [3, 4, 5, 10, 2, 21, 20, 8, 6, 7], analog: [2, 3, 4] },
-    consts: { TX: 21, RX: 20, SDA: 6, SCL: 7, SS: 20, MOSI: 10, MISO: 9, SCK: 8, A0: 2, A1: 3, A2: 4, ...seq('D', XIAO_C3_D) },
+    consts: { BOOT_PIN: 9, TX: 21, RX: 20, SDA: 6, SCL: 7, SS: 20, MOSI: 10, MISO: 9, SCK: 8, A0: 2, A1: 3, A2: 4, ...seq('D', XIAO_C3_D) },
     defines: ['ARDUINO_XIAO_ESP32C3', 'CONFIG_IDF_TARGET_ESP32C3'],
   },
   'board-xiao-esp32-c6': {
@@ -77,7 +77,7 @@ export const BOARDS = {
     led: { gpio: 15, activeLow: true }, boot: { gpio: 9 }, buzzer: 21,
     prefer: { digital: [0, 1, 2, 21, 16, 17, 18, 19, 20, 22, 23], analog: [0, 1, 2] },
     consts: {
-      LED_BUILTIN: 15, BUILTIN_LED: 15, TX: 16, RX: 17, SDA: 22, SCL: 23, SS: 21, MOSI: 18, MISO: 20, SCK: 19,
+      LED_BUILTIN: 15, BUILTIN_LED: 15, BOOT_PIN: 9, TX: 16, RX: 17, SDA: 22, SCL: 23, SS: 21, MOSI: 18, MISO: 20, SCK: 19,
       A0: 0, A1: 1, A2: 2, ...seq('D', XIAO_C6_D),
     },
     defines: ['ARDUINO_XIAO_ESP32C6', 'CONFIG_IDF_TARGET_ESP32C6'],

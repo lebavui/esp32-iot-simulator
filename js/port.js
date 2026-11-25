@@ -149,6 +149,16 @@ export function portProject(project, target, { route = true } = {}) {
     else if (x.spi) give(g, tc[x.spi]);
     else if (x.buzzer && usesBuzzer) give(g, tgt.buzzer);
   }
+  // pins fixed by the project for this target (examples: boardPins[target] = { source header pin: target header pin })
+  const fixed = new Set();
+  for (const [sp, tp] of Object.entries((project.boardPins || {})[target] || {})) {
+    const g = src.gpio[sp];
+    const t = tgt.gpio[tp];
+    if (g == null || t == null || map.has(g)) continue;
+    u(g);
+    give(g, t);
+    fixed.add(g);
+  }
   let needButton = false;
   if (bootUsed) {
     if (tgt.boot) give(src.boot.gpio, tgt.boot.gpio);
@@ -184,7 +194,7 @@ export function portProject(project, target, { route = true } = {}) {
     for (const side of ['left', 'right']) {
       const gs = [...map.keys()].filter((g) => {
         const x = use.get(g);
-        return x && x.wired && !x.sda && !x.scl && !x.spi && !x.buzzer && !!x.analog === kind && tgt[side].includes(pinOf(tgt, map.get(g)));
+        return x && x.wired && !fixed.has(g) && !x.sda && !x.scl && !x.spi && !x.buzzer && !!x.analog === kind && tgt[side].includes(pinOf(tgt, map.get(g)));
       });
       const ts = gs.map((g) => map.get(g)).sort((a, b) => pinY(target, pinOf(tgt, a)) - pinY(target, pinOf(tgt, b)));
       gs.sort((a, b) => pinY(srcType, pinOf(src, a)) - pinY(srcType, pinOf(src, b)));

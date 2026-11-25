@@ -29,11 +29,6 @@ const LCD_CONNS = [
   C('esp:3V3', 'lcd1:VCC', 'red', [[190, 228], [190, -22]]),
   C('esp:GND.2', 'lcd1:GND', 'black', [[180, 216], [180, -32]]),
 ];
-const DHT_CONNS = [
-  C('esp:D15', 'dht1:SDA', 'green', [[276, 204]]),
-  C('esp:3V3', 'dht1:VCC', 'red', [[268, 228]]),
-  C('esp:GND.2', 'dht1:GND', 'black', [[292, 216]]),
-];
 const OLED_PARTS = [{ type: 'esp32-iot-ssd1306', id: 'oled1', top: -40, left: 200, attrs: { address: '0x3C' } }];
 const OLED_CONNS = [
   C('esp:D21', 'oled1:SDA', 'blue', [[160, 108], [160, -55], [291, -55]]),
@@ -137,10 +132,21 @@ const OLED_AUTO = [
 ];
 // diagram from groups of { parts, conns }
 const compose = (...groups) => diagram(groups.flatMap((g) => g.parts), groups.flatMap((g) => g.conns));
-const dhtAt = (left, top) => ({
-  parts: [{ type: 'esp32-iot-dht22', id: 'dht1', top, left, attrs: { temperature: 28.5, humidity: 65 } }],
+const dhtAt = (left, top, type = 'dht22') => ({
+  parts: [{ type: 'esp32-iot-' + type, id: 'dht1', top, left, attrs: type === 'dht11' ? { temperature: 29, humidity: 70 } : { temperature: 28.5, humidity: 65 } }],
   conns: [C('esp:D15', 'dht1:SDA', 'green'), C('esp:3V3', 'dht1:VCC', 'red'), C('esp:GND.2', 'dht1:GND', 'black')],
 });
+// XIAO ESP32-C3 + DHT11 on D2, optionally LED + 220 Ω on D0 (left header); wires are routed when the example is opened.
+// On the DevKit the DHT11 goes to GPIO2 (D2) and the LED to GPIO13 (D13): DHT11_PINS = boardPins of these examples.
+const xiaoDht11 = (led) => boardDiagram('board-xiao-esp32-c3', [
+  ...(led ? [{ type: 'esp32-iot-resistor', id: 'r1', top: 20, left: -80, attrs: { value: '220' } },
+    { type: 'esp32-iot-led', id: 'led1', top: -40, left: -150, attrs: { color: 'red' } }] : []),
+  { type: 'esp32-iot-dht11', id: 'dht1', top: 40, left: -70, attrs: { temperature: 29, humidity: 70 } },
+], [
+  ...(led ? [C('esp:D0', 'r1:2', 'orange'), C('r1:1', 'led1:A', 'orange'), C('led1:C', 'esp:GND', 'black')] : []),
+  C('esp:D2', 'dht1:SDA', 'green'), C('esp:3V3', 'dht1:VCC', 'red'), C('esp:GND', 'dht1:GND', 'black'),
+]);
+const DHT11_PINS = { 'esp32-iot-esp32-devkit-v1': { D0: 'D13', D2: 'D2' } };
 
 const ALL = [
   {
@@ -686,7 +692,7 @@ void loop() {
   },
   {
     id: 'http-post', name: '14. HTTP POST: gửi dữ liệu cảm biến lên ThingsBoard', category: 'IoT',
-    code: `// Mỗi 5 giây đọc DHT22 và gửi nhiệt độ, độ ẩm lên ThingsBoard Cloud bằng HTTP POST (telemetry).
+    code: `// Mỗi 5 giây đọc DHT11 (chân D2) và gửi nhiệt độ, độ ẩm lên ThingsBoard Cloud bằng HTTP POST (telemetry).
 // Trên thingsboard.cloud: tạo device, copy Access token vào TOKEN; xem dữ liệu ở tab "Latest telemetry".
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -697,7 +703,7 @@ const char* ssid = "ESP32-IoT-GUEST";
 const char* password = "";
 const char* TOKEN = "YOUR_ACCESS_TOKEN";   // Access token của device trên ThingsBoard
 
-DHT dht(15, DHT22);
+DHT dht(D2, DHT11);
 
 void setup() {
   Serial.begin(115200);
@@ -733,11 +739,12 @@ void loop() {
   delay(5000);
 }
 `,
-    diagram: diagram([DHT_LCD_PARTS[1]], DHT_CONNS),
+    diagram: xiaoDht11(false),
+    boardPins: DHT11_PINS,
   },
   {
-    id: 'mqtt', name: '15. MQTT ThingsBoard: gửi DHT22, điều khiển LED', category: 'IoT',
-    code: `// MQTT với ThingsBoard Cloud: mỗi 5 giây gửi nhiệt độ, độ ẩm (DHT22) làm telemetry,
+    id: 'mqtt', name: '15. MQTT ThingsBoard: gửi DHT11, điều khiển LED', category: 'IoT',
+    code: `// MQTT với ThingsBoard Cloud: mỗi 5 giây gửi nhiệt độ, độ ẩm (DHT11, chân D2) làm telemetry,
 // và bật/tắt LED theo shared attribute "led-state" (nhận ngay khi giá trị đổi trên ThingsBoard).
 // Trên thingsboard.cloud: tạo device, copy Access token vào TOKEN, thêm Shared attribute "led-state" kiểu Boolean.
 // Trình duyệt không mở được kết nối TCP: MQTT tới thingsboard.cloud:1883 đi qua server.js (cần chạy "npm start").
@@ -754,8 +761,8 @@ const char* TOKEN = "YOUR_ACCESS_TOKEN";   // Access token của device = userna
 
 WiFiClient espClient;
 PubSubClient client(espClient);
-DHT dht(15, DHT22);
-const int LED_PIN = 4;
+DHT dht(D2, DHT11);
+const int LED_PIN = D0;
 unsigned long lastSend = 0;
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -817,10 +824,8 @@ void loop() {
   delay(10);
 }
 `,
-    diagram: diagram([...LED_D4.parts, Object.assign({}, DHT_LCD_PARTS[1], { left: 310 })], [...LED_D4.conns,
-      C('esp:D15', 'dht1:SDA', 'green', [[326, 204]]),
-      C('esp:3V3', 'dht1:VCC', 'red', [[318, 228]]),
-      C('esp:GND.2', 'dht1:GND', 'black', [[342, 216]])]),
+    diagram: xiaoDht11(true),
+    boardPins: DHT11_PINS,
   },
   {
     id: 'freertos', name: 'FreeRTOS: 2 task nháy 2 LED', category: 'Nâng cao',
@@ -1746,7 +1751,7 @@ void loop() {
   // ---------------------------------------------------------------- radio
   {
     id: 'lora-sender', name: '31. LoRa: node gửi nhiệt độ/độ ẩm', category: 'Truyền thông',
-    code: `// LoRa SX1278 (Ra-02, 433 MHz) qua SPI: gửi nhiệt độ/độ ẩm DHT22 mỗi 5 giây.
+    code: `// LoRa SX1278 (Ra-02, 433 MHz) qua SPI: gửi nhiệt độ/độ ẩm DHT11 mỗi 5 giây.
 // Thư viện: LoRa by Sandeep Mistry (#include <LoRa.h>).
 // Thử nghiệm: mở trình giả lập ở MỘT TAB KHÁC với ví dụ "LoRa: node nhận" rồi chạy cả hai —
 // các tab chung một "không gian sóng" ảo. Tần số, spreading factor và sync word hai bên phải giống nhau.
@@ -1759,7 +1764,7 @@ void loop() {
 #define LORA_DIO0 2
 #define DHT_PIN 15
 
-DHT dht(DHT_PIN, DHT22);
+DHT dht(DHT_PIN, DHT11);
 int counter = 0;
 
 void setup() {
@@ -1790,7 +1795,7 @@ void loop() {
   delay(5000);
 }
 `,
-    diagram: compose(loraRight(), dhtAt(330, 150)),
+    diagram: compose(loraRight(), dhtAt(330, 150, 'dht11')),
   },
   {
     id: 'lora-receiver', name: '32. LoRa: node nhận + OLED (RSSI/SNR)', category: 'Truyền thông',
@@ -2084,9 +2089,9 @@ void loop() {
     diagram: compose(LED_D4, dhtAt(300, 120)),
   },
   {
-    id: 'coap-client', name: '22. CoAP ThingsBoard: gửi DHT22, điều khiển LED', category: 'Giao thức',
+    id: 'coap-client', name: '22. CoAP ThingsBoard: gửi DHT11, điều khiển LED', category: 'Giao thức',
     code: `// CoAP với ThingsBoard Cloud (coap.thingsboard.cloud:5683): mỗi 5 giây
-//  - POST nhiệt độ, độ ẩm (DHT22) lên /api/v1/TOKEN/telemetry
+//  - POST nhiệt độ, độ ẩm (DHT11, chân D2) lên /api/v1/TOKEN/telemetry
 //  - GET shared attribute "led-state" (/api/v1/TOKEN/attributes?sharedKeys=led-state) rồi bật/tắt LED.
 // Trên thingsboard.cloud: tạo device, copy Access token vào TOKEN, thêm Shared attribute "led-state" kiểu Boolean.
 // Trình duyệt không gửi được UDP: cần chạy "npm start", server sẽ chuyển tiếp gói CoAP.
@@ -2100,11 +2105,11 @@ void loop() {
 const char* ssid = "ESP32-IoT-GUEST";
 const char* password = "";
 const char* TOKEN = "YOUR_ACCESS_TOKEN";   // Access token của device trên ThingsBoard
-const int LED_PIN = 4;
+const int LED_PIN = D0;
 
 WiFiUDP udp;
 Coap coap(udp);
-DHT dht(15, DHT22);
+DHT dht(D2, DHT11);
 IPAddress tbIP;
 String telemetryUrl, attributesUrl;
 unsigned long lastSend = 0;
@@ -2167,10 +2172,8 @@ void loop() {
   delay(10);
 }
 `,
-    diagram: diagram([...LED_D4.parts, Object.assign({}, DHT_LCD_PARTS[1], { left: 310 })], [...LED_D4.conns,
-      C('esp:D15', 'dht1:SDA', 'green', [[326, 204]]),
-      C('esp:3V3', 'dht1:VCC', 'red', [[318, 228]]),
-      C('esp:GND.2', 'dht1:GND', 'black', [[342, 216]])]),
+    diagram: xiaoDht11(true),
+    boardPins: DHT11_PINS,
   },
   // ---------------------------------------------------------------- catalog additions
   {
@@ -3019,7 +3022,6 @@ void loop() {
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-#define BOOT_PIN 0                       // nút BOOT trên board (nhấn = LOW)
 #define AP_PASS "12345678"               // mật khẩu WiFi do board phát (8-63 ký tự)
 const unsigned long CONNECT_TIMEOUT = 15000;  // quá thời gian này mà chưa kết nối được -> mở chế độ AP
 const unsigned long RESET_HOLD = 5000;        // giữ BOOT bao lâu thì xóa cấu hình
@@ -3245,7 +3247,7 @@ bool connectWiFi() {
 
 void setup() {
   Serial.begin(115200);
-  pinMode(BOOT_PIN, INPUT_PULLUP);
+  pinMode(BOOT_PIN, INPUT_PULLUP);        // BOOT_PIN: nút BOOT của board (định nghĩa sẵn: GPIO0 DevKit, GPIO9 XIAO)
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) Serial.println("Khong tim thay OLED 0x3C!");
   String mac = WiFi.macAddress();         // "24:0A:C4:12:AB:CD" -> "ESP32-ABCD"
   apSsid = "ESP32-" + mac.substring(12, 14) + mac.substring(15, 17);
@@ -3297,7 +3299,7 @@ void loop() {
   {
     id: 'freertos-queue', name: 'FreeRTOS: gửi dữ liệu & điều khiển LED qua ThingsBoard (HTTP)', category: 'FreeRTOS',
     code: `// Hai task FreeRTOS chạy đồng thời, cùng làm việc với ThingsBoard Cloud qua HTTP:
-//  - taskSendData: mỗi 5 giây đọc DHT22 và gửi nhiệt độ, độ ẩm lên bằng HTTP POST (telemetry)
+//  - taskSendData: mỗi 5 giây đọc DHT11 (chân D2) và gửi nhiệt độ, độ ẩm lên bằng HTTP POST (telemetry)
 //  - taskGetLed  : mỗi 1 giây đọc trạng thái LED (shared attribute "led-state") bằng HTTP GET và bật/tắt LED
 // Mỗi task chờ bằng vTaskDelay() nên chu kỳ 5 s và 1 s không chờ lẫn nhau.
 // Trên thingsboard.cloud: tạo device, copy Access token vào TOKEN, thêm Shared attribute "led-state" kiểu Boolean;
@@ -3310,9 +3312,9 @@ void loop() {
 const char* ssid = "ESP32-IoT-GUEST";
 const char* password = "";
 const char* TOKEN = "YOUR_ACCESS_TOKEN";   // Access token của device trên ThingsBoard
-const int LED_PIN = 4;
+const int LED_PIN = D0;
 
-DHT dht(15, DHT22);
+DHT dht(D2, DHT11);
 
 // Task 1: đọc cảm biến và POST lên ThingsBoard
 void taskSendData(void* pv) {
@@ -3387,7 +3389,8 @@ void loop() {
   vTaskDelete(NULL);   // mọi việc đã chia cho các task
 }
 `,
-    diagram: compose(LED_D4, dhtAt(300, 120)),
+    diagram: xiaoDht11(true),
+    boardPins: DHT11_PINS,
   },
 ];
 
@@ -3432,8 +3435,8 @@ const CATALOG = [
   ['Kết nối', [
     ['http-get', 'HTTP GET: điều khiển LED từ ThingsBoard'],
     ['http-post', 'HTTP POST: gửi dữ liệu cảm biến lên ThingsBoard'],
-    ['mqtt', 'MQTT ThingsBoard: gửi DHT22, điều khiển LED'],
-    ['coap-client', 'CoAP ThingsBoard: gửi DHT22, điều khiển LED'],
+    ['mqtt', 'MQTT ThingsBoard: gửi DHT11, điều khiển LED'],
+    ['coap-client', 'CoAP ThingsBoard: gửi DHT11, điều khiển LED'],
     ['wifi-manager', 'WiFi Manager: phát AP + web cấu hình WiFi, giữ BOOT 5 s để cài lại'],
   ]],
   ['FreeRTOS', [

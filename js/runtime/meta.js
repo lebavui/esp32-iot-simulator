@@ -59,7 +59,7 @@ export const CONSTS = {
   HIGH: [1, 'int'], LOW: [0, 'int'],
   INPUT: [0x01, 'int'], OUTPUT: [0x03, 'int'], INPUT_PULLUP: [0x05, 'int'], INPUT_PULLDOWN: [0x09, 'int'],
   OPEN_DRAIN: [0x10, 'int'], OUTPUT_OPEN_DRAIN: [0x13, 'int'], ANALOG: [0xC0, 'int'],
-  LED_BUILTIN: [2, 'int'], BUILTIN_LED: [2, 'int'],
+  LED_BUILTIN: [2, 'int'], BUILTIN_LED: [2, 'int'], BOOT_PIN: [0, 'int'],
   RISING: [1, 'int'], FALLING: [2, 'int'], CHANGE: [3, 'int'], ONLOW: [4, 'int'], ONHIGH: [5, 'int'],
   DEC: [10, 'int'], HEX: [16, 'int'], OCT: [8, 'int'], BIN: [2, 'int'],
   LSBFIRST: [0, 'int'], MSBFIRST: [1, 'int'],
